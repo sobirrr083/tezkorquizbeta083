@@ -3,8 +3,8 @@ import logging
 import asyncio
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
+from aiogram import F
 from aiogram.filters import Command
-from aiogram.filters.chat_type import ChatTypeFilter
 from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -198,7 +198,7 @@ async def cmd_start(message: types.Message):
             reply_markup=get_subscription_keyboard()
         )
 
-@dp.message(Command("stop"), ChatTypeFilter(chat_types=['private']))
+@dp.message(Command("stop"), lambda message: message.chat.type == 'private')
 async def cmd_stop(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(
@@ -206,7 +206,7 @@ async def cmd_stop(message: types.Message, state: FSMContext):
         reply_markup=get_main_keyboard()
     )
 
-@dp.message(Command("admin"), ChatTypeFilter(chat_types=['private']))
+@dp.message(Command("admin"), lambda message: message.chat.type == 'private')
 async def cmd_admin(message: types.Message):
     user_id = message.from_user.id
 
@@ -226,7 +226,7 @@ async def cmd_admin(message: types.Message):
         reply_markup=admin_keyboard.as_markup()
     )
 
-@dp.message(Command("yordam"), ChatTypeFilter(chat_types=['private']))
+@dp.message(Command("yordam"), lambda message: message.chat.type == 'private')
 async def cmd_help(message: types.Message):
     user_id = message.from_user.id
 
@@ -268,7 +268,7 @@ async def cmd_help(message: types.Message):
     )
     await message.answer(help_text, reply_markup=get_back_keyboard())
 
-@dp.message(Command("ai"), ChatTypeFilter(chat_types=['private']))
+@dp.message(Command("ai"), lambda message: message.chat.type == 'private')
 async def cmd_ai(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
 
@@ -330,7 +330,7 @@ async def process_ai_query(message: types.Message, state: FSMContext):
         logging.error(f"Gemini AI error: {e}")
         await message.answer("Xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring.", reply_markup=get_back_keyboard())
 
-@dp.message(Command("broadcast"), ChatTypeFilter(chat_types=['private']))
+@dp.message(Command("broadcast"), lambda message: message.chat.type == 'private')
 async def cmd_broadcast(message: types.Message, state: FSMContext):
     if message.from_user.id not in ADMIN_IDS:
         await message.answer("Bu buyruq faqat adminlar uchun.", reply_markup=get_main_keyboard())
@@ -381,7 +381,7 @@ async def process_broadcast(message: types.Message, state: FSMContext):
                         reply_markup=get_main_keyboard())
     await state.clear()
 
-@dp.message(lambda message: message.text == "Motivatsiya qo'shish ✨", ChatTypeFilter(chat_types=['private']))
+@dp.message(lambda message: message.text == "Motivatsiya qo'shish ✨" and message.chat.type == 'private')
 async def add_motivation(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
 
@@ -652,250 +652,296 @@ async def like_motivation(callback_query: types.CallbackQuery):
 @dp.callback_query(lambda c: c.data.startswith("share_motivation_"))
 async def share_motivation(callback_query: types.CallbackQuery):
     motivation_id = int(callback_query.data.split("_")[2])
-
+    
     conn = sqlite3.connect('bot_database.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT text FROM motivations WHERE id = ?", (motivation_id,))
-    motivation = cursor.fetchone()
     cursor.execute("UPDATE motivations SET shares = shares + 1 WHERE id = ?", (motivation_id,))
+    cursor.execute("SELECT text, likes, shares FROM motivations WHERE id = ?", (motivation_id,))
+    motivation = cursor.fetchone()
     conn.commit()
     conn.close()
-
+    
     if motivation:
-        share_text = f"📣 Motivatsiya:\n\n{motivation[0]}\n\n📲 @tezkorquiz_bot orqali"
-        await callback_query.answer("Ulashish uchun tayyor")
-
-        share_button = InlineKeyboardBuilder()
-        share_button.row(InlineKeyboardButton(text="Botga o'tish", url=f"https://t.me/{(await bot.me()).username}"))
-
-        await bot.send_message(
-            callback_query.message.chat.id,
-            share_text,
-            reply_markup=share_button.as_markup()
+        motivation_text, likes_count, shares_count = motivation
+        
+        keyboard = InlineKeyboardBuilder()
+        keyboard.row(
+            InlineKeyboardButton(text=f"👍 ({likes_count})", callback_data=f"like_motivation_{motivation_id}"),
+            InlineKeyboardButton(text=f"🔄 Ulashish ({shares_count})", callback_data=f"share_motivation_{motivation_id}")
         )
+        
+        try:
+            await bot.edit_message_reply_markup(
+                callback_query.message.chat.id,
+                callback_query.message.message_id,
+                reply_markup=keyboard.as_markup()
+            )
+            
+            # Create share link
+            share_text = f"📢 Motivatsiya:\n\n{motivation_text}\n\n👉 @{(await bot.me()).username}"
+            share_url = f"https://t.me/share/url?url={WEBSITE_URL}&text={share_text}"
+            
+            await callback_query.answer("Ulashish uchun havola nusxalandi", show_alert=True)
+        except Exception as e:
+            logging.error(f"Failed to share motivation: {e}")
+            await callback_query.answer("Xatolik yuz berdi")
 
-# Daily motivation sender
+@dp.callback_query(lambda c: c.data == "admin_broadcast")
+async def admin_broadcast_command(callback_query: types.CallbackQuery, state: FSMContext):
+    if callback_query.from_user.id not in ADMIN_IDS:
+        await callback_query.answer("Bu harakat faqat adminlar uchun", show_alert=True)
+        return
+    
+    await state.set_state(Form.waiting_for_broadcast)
+    await callback_query.answer()
+    await bot.send_message(
+        callback_query.from_user.id,
+        "Barcha foydalanuvchilarga yuboriladigan xabarni kiriting:",
+        reply_markup=get_back_keyboard()
+    )
+
+@dp.callback_query(lambda c: c.data == "admin_stats")
+async def admin_stats(callback_query: types.CallbackQuery):
+    if callback_query.from_user.id not in ADMIN_IDS:
+        await callback_query.answer("Bu harakat faqat adminlar uchun", show_alert=True)
+        return
+    
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total_users = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM users WHERE is_subscribed_channel = 1 AND is_subscribed_group = 1")
+    subscribed_users = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM motivations WHERE status = 'approved'")
+    approved_motivations = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM motivations WHERE status = 'pending'")
+    pending_motivations = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM motivations")
+    total_motivations = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT SUM(likes) FROM motivations")
+    total_likes = cursor.fetchone()[0] or 0
+    
+    cursor.execute("SELECT SUM(shares) FROM motivations")
+    total_shares = cursor.fetchone()[0] or 0
+    
+    conn.close()
+    
+    stats_text = (
+        "📊 Bot statistikasi:\n\n"
+        f"👤 Jami foydalanuvchilar: {total_users}\n"
+        f"✅ A'zo bo'lganlar: {subscribed_users}\n"
+        f"📢 A'zo bo'lmaganlar: {total_users - subscribed_users}\n\n"
+        f"✨ Jami motivatsiyalar: {total_motivations}\n"
+        f"✅ Tasdiqlangan: {approved_motivations}\n"
+        f"⏳ Kutilmoqda: {pending_motivations}\n"
+        f"❌ Rad etilgan: {total_motivations - approved_motivations - pending_motivations}\n\n"
+        f"👍 Jami like'lar: {total_likes}\n"
+        f"🔄 Jami ulashishlar: {total_shares}"
+    )
+    
+    await callback_query.answer()
+    await bot.send_message(
+        callback_query.from_user.id,
+        stats_text
+    )
+
+# Handle simple messages
+@dp.message(lambda message: message.text == "Yordam 🆘" and message.chat.type == 'private')
+async def help_button(message: types.Message):
+    await cmd_help(message)
+
+@dp.message(lambda message: message.text == "Biz haqimizda ℹ️" and message.chat.type == 'private')
+async def about_button(message: types.Message):
+    user_id = message.from_user.id
+    
+    if user_id in ADMIN_IDS:
+        about_text = (
+            "ℹ️ Bot haqida ma'lumot:\n\n"
+            "Bu bot Gemini AI orqali sun'iy intellekt imkoniyatlarini taqdim etadi.\n"
+            "Shuningdek, motivatsion fikrlar almashinuvini qo'llab-quvvatlaydi.\n\n"
+            "Asosiy imkoniyatlar:\n"
+            "- Gemini AI bilan suhbatlashish\n"
+            "- Motivatsion fikrlar qo'shish va ulashish\n"
+            "- Kunlik motivatsiyalar olish\n\n"
+            "Bizning kanalimizga a'zo bo'ling va guruhimizga qo'shiling!"
+        )
+        await message.answer(about_text, reply_markup=get_main_keyboard())
+        return
+    
+    is_subscribed = await check_subscription(user_id)
+    
+    if not is_subscribed:
+        await message.answer("Botdan foydalanish uchun kanal va guruhga a'zo bo'ling:",
+                          reply_markup=get_subscription_keyboard())
+        return
+    
+    about_text = (
+        "ℹ️ Bot haqida ma'lumot:\n\n"
+        "Bu bot Gemini AI orqali sun'iy intellekt imkoniyatlarini taqdim etadi.\n"
+        "Shuningdek, motivatsion fikrlar almashinuvini qo'llab-quvvatlaydi.\n\n"
+        "Asosiy imkoniyatlar:\n"
+        "- Gemini AI bilan suhbatlashish\n"
+        "- Motivatsion fikrlar qo'shish va ulashish\n"
+        "- Kunlik motivatsiyalar olish\n\n"
+        "Bizning kanalimizga a'zo bo'ling va guruhimizga qo'shiling!"
+    )
+    await message.answer(about_text, reply_markup=get_main_keyboard())
+
+@dp.message(lambda message: message.text == "Kanal 📢" and message.chat.type == 'private')
+async def channel_button(message: types.Message):
+    channel_link = f"https://t.me/{CHANNEL_ID.replace('@', '')}"
+    
+    channel_keyboard = InlineKeyboardBuilder()
+    channel_keyboard.row(InlineKeyboardButton(text="Kanalga o'tish", url=channel_link))
+    
+    await message.answer(
+        "Bizning rasmiy kanalimizga a'zo bo'ling va yangiliklar bilan tanishing!",
+        reply_markup=channel_keyboard.as_markup()
+    )
+
+@dp.message(lambda message: message.text == "Guruh 👥" and message.chat.type == 'private')
+async def group_button(message: types.Message):
+    group_link = f"https://t.me/{GROUP_ID.replace('@', '')}"
+    
+    group_keyboard = InlineKeyboardBuilder()
+    group_keyboard.row(InlineKeyboardButton(text="Guruhga o'tish", url=group_link))
+    
+    await message.answer(
+        "Bizning rasmiy guruhimizga qo'shiling va muhokamada qatnashing!",
+        reply_markup=group_keyboard.as_markup()
+    )
+
+@dp.message(lambda message: message.text == "Web-sayt 🌐" and message.chat.type == 'private')
+async def website_button(message: types.Message):
+    website_keyboard = InlineKeyboardBuilder()
+    website_keyboard.row(InlineKeyboardButton(text="Web-saytga o'tish", url=WEBSITE_URL))
+    
+    await message.answer(
+        "Bizning rasmiy web-saytimizga tashrif buyuring!",
+        reply_markup=website_keyboard.as_markup()
+    )
+
+@dp.message(lambda message: message.text == "AI bilan suhbat 🤖" and message.chat.type == 'private')
+async def ai_chat_button(message: types.Message, state: FSMContext):
+    await cmd_ai(message, state)
+
+@dp.message(lambda message: message.text == "🔙 Ortga qaytish" and message.chat.type == 'private')
+async def back_button(message: types.Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state:
+        await state.clear()
+    
+    await message.answer("Asosiy menyu:", reply_markup=get_main_keyboard())
+
+@dp.message(lambda message: message.text == "Botga kirish 🚀" and message.chat.type in ['group', 'supergroup'])
+async def start_from_group(message: types.Message):
+    bot_username = (await bot.me()).username
+    
+    keyboard = InlineKeyboardBuilder()
+    keyboard.row(InlineKeyboardButton(text="Botga o'tish", url=f"https://t.me/{bot_username}"))
+    
+    await message.answer(
+        "Botdan foydalanish uchun quyidagi havolaga o'ting:",
+        reply_markup=keyboard.as_markup()
+    )
+
+@dp.message(lambda message: message.text == "Bot haqida ℹ️" and message.chat.type in ['group', 'supergroup'])
+async def about_from_group(message: types.Message):
+    bot_username = (await bot.me()).username
+    
+    keyboard = InlineKeyboardBuilder()
+    keyboard.row(InlineKeyboardButton(text="Botga o'tish", url=f"https://t.me/{bot_username}"))
+    
+    about_text = (
+        "ℹ️ Bot haqida ma'lumot:\n\n"
+        "Bu bot Gemini AI orqali sun'iy intellekt imkoniyatlarini taqdim etadi.\n"
+        "Shuningdek, motivatsion fikrlar almashinuvini qo'llab-quvvatlaydi.\n\n"
+        "Asosiy imkoniyatlar:\n"
+        "- Gemini AI bilan suhbatlashish\n"
+        "- Motivatsion fikrlar qo'shish va ulashish\n"
+        "- Kunlik motivatsiyalar olish\n\n"
+        "Botdan foydalanish uchun quyidagi havolaga o'ting:"
+    )
+    
+    await message.answer(about_text, reply_markup=keyboard.as_markup())
+
+# Daily motivation function
 async def send_daily_motivation():
     try:
         conn = sqlite3.connect('bot_database.db')
         cursor = conn.cursor()
-
+        
+        # Get a random approved motivation
         cursor.execute("SELECT id, text FROM motivations WHERE status = 'approved' ORDER BY RANDOM() LIMIT 1")
         motivation = cursor.fetchone()
-
+        
         if not motivation:
             logging.warning("No approved motivations found for daily sending")
             conn.close()
             return
-
+        
         motivation_id, motivation_text = motivation
-
-        cursor.execute("SELECT user_id FROM users")
-        users = cursor.fetchall()
+        
+        # Get users who are subscribed to both channel and group
+        cursor.execute("SELECT user_id FROM users WHERE is_subscribed_channel = 1 AND is_subscribed_group = 1")
+        subscribed_users = cursor.fetchall()
+        
         conn.close()
-
+        
+        if not subscribed_users:
+            logging.warning("No subscribed users found for daily motivation")
+            return
+        
         keyboard = InlineKeyboardBuilder()
         keyboard.row(
-            InlineKeyboardButton(text="👍 (0)", callback_data=f"like_motivation_{motivation_id}"),
+            InlineKeyboardButton(text="👍", callback_data=f"like_motivation_{motivation_id}"),
             InlineKeyboardButton(text="🔄 Ulashish", callback_data=f"share_motivation_{motivation_id}")
         )
-
-        for user in users:
+        
+        daily_text = (
+            "🌞 Bugungi kunning motivatsiyasi:\n\n"
+            f"{motivation_text}"
+        )
+        
+        sent_count = 0
+        failed_count = 0
+        
+        for user in subscribed_users:
             try:
-                await bot.send_message(
-                    user[0],
-                    f"🌟 Bugungi motivatsiya:\n\n{motivation_text}",
-                    reply_markup=keyboard.as_markup()
-                )
-                await asyncio.sleep(0.05)
+                await bot.send_message(user[0], daily_text, reply_markup=keyboard.as_markup())
+                sent_count += 1
+                await asyncio.sleep(0.05)  # To avoid flood limits
             except Exception as e:
                 logging.error(f"Failed to send daily motivation to {user[0]}: {e}")
-
+                failed_count += 1
+        
+        logging.info(f"Daily motivation sent: {sent_count} successful, {failed_count} failed")
+        
     except Exception as e:
-        logging.error(f"Error in daily motivation sender: {e}")
+        logging.error(f"Error in daily motivation function: {e}")
 
-# Text message handler for group and private chats
-@dp.message()
-async def process_text_messages(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-
-    # Group chat handling
-    if message.chat.type in ['group', 'supergroup']:
-        if message.text == "Botga kirish 🚀":
-            bot_username = (await bot.me()).username
-            await message.answer(
-                f"Bot bilan shaxsiy suhbatda ishlash uchun quyidagi link orqali o'ting:\n"
-                f"https://t.me/{bot_username}",
-                reply_markup=get_group_keyboard()
-            )
-        elif message.text == "Bot haqida ℹ️":
-            about_text = (
-                "📱 Bot haqida ma'lumot:\n\n"
-                "Bu bot Gemini sun'iy intellekt bilan integratsiyalashgan multifunksional Telegram bot. "
-                "Bot orqali siz sun'iy intellekt bilan suhbatlashish, kunlik motivatsiyalar olish, "
-                "o'z motivatsiyalaringizni qo'shish va ko'plab boshqa imkoniyatlardan foydalanishingiz mumkin.\n\n"
-                "🌟 Asosiy funksiyalar:\n"
-                "- Gemini AI bilan sun'iy intellekt suhbati\n"
-                "- Kunlik motivatsiyalar\n"
-                "- Kanal va guruh yangiliklari\n"
-                "- O'z motivatsiyalaringizni qo'shish\n\n"
-                "📞 Bot bilan shaxsiy suhbatda ishlash uchun 'Botga kirish' tugmasini bosing."
-            )
-            await message.answer(about_text, reply_markup=get_group_keyboard())
-        else:
-            await message.answer(
-                "Guruhda faqat quyidagi funksiyalar mavjud:",
-                reply_markup=get_group_keyboard()
-            )
-        return
-
-    # Private chat handling
-    if message.text == "🔙 Ortga qaytish":
-        await state.clear()
-        await message.answer("Asosiy menyuga qaytildi:", reply_markup=get_main_keyboard())
-        return
-
-    if user_id in ADMIN_IDS:
-        if message.text == "Yordam 🆘":
-            help_text = (
-                "🔍 Bot buyruqlari:\n\n"
-                "/start - Botni ishga tushirish\n"
-                "/stop - Botni to'xtatish\n"
-                "/yordam - Yordam olish\n"
-                "/ai - Sun'iy intellekt bilan muloqot\n"
-                "/admin - Admin paneli\n\n"
-                "👇 Asosiy imkoniyatlar:\n"
-                "- Gemini AI bilan suhbatlashish\n"
-                "- Kunlik motivatsiya olish\n"
-                "- Motivatsiya qo'shish\n"
-                "- Kanal va guruh yangiliklari"
-            )
-            await message.answer(help_text, reply_markup=get_back_keyboard())
-        elif message.text == "Biz haqimizda ℹ️":
-            about_text = (
-                "📱 Bot haqida ma'lumot:\n\n"
-                "Bu bot Gemini sun'iy intellekt bilan integratsiyalashgan multifunksional Telegram bot. "
-                "Bot orqali siz sun'iy intellekt bilan suhbatlashish, kunlik motivatsiyalar olish, "
-                "o'z motivatsiyalaringizni qo'shish va ko'plab boshqa imkoniyatlardan foydalanishingiz mumkin.\n\n"
-                "🌟 Asosiy funksiyalar:\n"
-                "- Gemini AI bilan sun'iy intellekt suhbati\n"
-                "- Kunlik motivatsiyalar\n"
-                "- Kanal va guruh yangiliklari\n"
-                "- O'z motivatsiyalaringizni qo'shish\n\n"
-                "📞 Murojaat uchun: @sobirrr083"
-            )
-            await message.answer(about_text, reply_markup=get_back_keyboard())
-        elif message.text == "Kanal 📢":
-            channel_keyboard = InlineKeyboardBuilder()
-            channel_keyboard.row(
-                InlineKeyboardButton(text="Kanalga o'tish", url=f"https://t.me/{CHANNEL_ID.replace('@', '')}"))
-            await message.answer("Bizning rasmiy kanalimizga o'ting va yangiliklardan xabardor bo'ling:",
-                                 reply_markup=channel_keyboard.as_markup())
-            await message.answer("Qaytish uchun:", reply_markup=get_back_keyboard())
-        elif message.text == "Guruh 👥":
-            group_keyboard = InlineKeyboardBuilder()
-            group_keyboard.row(
-                InlineKeyboardButton(text="Guruhga o'tish", url=f"https://t.me/{GROUP_ID.replace('@', '')}"))
-            await message.answer("Bizning guruhimizga qo'shiling va muhokamada ishtirok eting:",
-                                 reply_markup=group_keyboard.as_markup())
-            await message.answer("Qaytish uchun:", reply_markup=get_back_keyboard())
-        elif message.text == "Web-sayt 🌐":
-            website_keyboard = InlineKeyboardBuilder()
-            website_keyboard.row(InlineKeyboardButton(text="Saytga o'tish", url=WEBSITE_URL))
-            await message.answer("Rasmiy web-saytimizga tashrif buyuring:",
-                                 reply_markup=website_keyboard.as_markup())
-            await message.answer("Qaytish uchun:", reply_markup=get_back_keyboard())
-        elif message.text == "AI bilan suhbat 🤖":
-            await state.set_state(Form.waiting_for_ai_query)
-            await message.answer("Gemini AI bilan suhbatni boshladingiz. Savolingizni yozing (chiqish uchun /stop):",
-                                 reply_markup=get_back_keyboard())
-        else:
-            await message.answer("Noma'lum buyruq. Iltimos, quyidagi tugmalardan foydalaning:",
-                                 reply_markup=get_main_keyboard())
-        return
-
-    is_subscribed = await check_subscription(user_id)
-
-    if not is_subscribed and message.text not in ["Kanal 📢", "Guruh 👥"]:
-        await message.answer("Botdan foydalanish uchun kanal va guruhga a'zo bo'ling:",
-                             reply_markup=get_subscription_keyboard())
-        return
-
-    if message.text == "Yordam 🆘":
-        help_text = (
-            "🔍 Bot buyruqlari:\n\n"
-            "/start - Botni ishga tushirish\n"
-            "/stop - Botni to'xtatish\n"
-            "/yordam - Yordam olish\n"
-            "/ai - Sun'iy intellekt bilan muloqot\n\n"
-            "👇 Asosiy imkoniyatlar:\n"
-            "- Gemini AI bilan suhbatlashish\n"
-            "- Kunlik motivatsiya olish\n"
-            "- Motivatsiya qo'shish\n"
-            "- Kanal va guruh yangiliklari"
-        )
-        await message.answer(help_text, reply_markup=get_back_keyboard())
-    elif message.text == "Biz haqimizda ℹ️":
-        about_text = (
-            "📱 Bot haqida ma'lumot:\n\n"
-            "Bu bot Gemini sun'iy intellekt bilan integratsiyalashgan multifunksional Telegram bot. "
-            "Bot orqali siz sun'iy intellekt bilan suhbatlashish, kunlik motivatsiyalar olish, "
-            "o'z motivatsiyalaringizni qo'shish va ko'plab boshqa imkoniyatlardan foydalanishingiz mumkin.\n\n"
-            "🌟 Asosiy funksiyalar:\n"
-            "- Gemini AI bilan sun'iy intellekt suhbati\n"
-            "- Kunlik motivatsiyalar\n"
-            "- Kanal va guruh yangiliklari\n"
-            "- O'z motivatsiyalaringizni qo'shish\n\n"
-            "📞 Murojaat uchun: @admin_username"
-        )
-        await message.answer(about_text, reply_markup=get_back_keyboard())
-    elif message.text == "Kanal 📢":
-        channel_keyboard = InlineKeyboardBuilder()
-        channel_keyboard.row(
-            InlineKeyboardButton(text="Kanalga o'tish", url=f"https://t.me/{CHANNEL_ID.replace('@', '')}"))
-        await message.answer("Bizning rasmiy kanalimizga o'ting va yangiliklardan xabardor bo'ling:",
-                             reply_markup=channel_keyboard.as_markup())
-        await message.answer("Qaytish uchun:", reply_markup=get_back_keyboard())
-    elif message.text == "Guruh 👥":
-        group_keyboard = InlineKeyboardBuilder()
-        group_keyboard.row(
-            InlineKeyboardButton(text="Guruhga o'tish", url=f"https://t.me/{GROUP_ID.replace('@', '')}"))
-        await message.answer("Bizning guruhimizga qo'shiling va muhokamada ishtirok eting:",
-                             reply_markup=group_keyboard.as_markup())
-        await message.answer("Qaytish uchun:", reply_markup=get_back_keyboard())
-    elif message.text == "Web-sayt 🌐":
-        website_keyboard = InlineKeyboardBuilder()
-        website_keyboard.row(InlineKeyboardButton(text="Saytga o'tish", url=WEBSITE_URL))
-        await message.answer("Rasmiy web-saytimizga tashrif buyuring:",
-                             reply_markup=website_keyboard.as_markup())
-        await message.answer("Qaytish uchun:", reply_markup=get_back_keyboard())
-    elif message.text == "AI bilan suhbat 🤖":
-        await state.set_state(Form.waiting_for_ai_query)
-        await message.answer("Gemini AI bilan suhbatni boshladingiz. Savolingizni yozing (chiqish uchun /stop):",
-                             reply_markup=get_back_keyboard())
-    else:
-        await message.answer("Noma'lum buyruq. Iltimos, quyidagi tugmalardan foydalaning:",
-                             reply_markup=get_main_keyboard())
-
-# Setup scheduler for daily motivation
+# Setup scheduler
 async def setup_scheduler():
     scheduler = AsyncIOScheduler()
+    
+    # Parse notification time
     hour, minute = map(int, NOTIFICATION_TIME.split(':'))
+    
     scheduler.add_job(send_daily_motivation, 'cron', hour=hour, minute=minute)
     scheduler.start()
-    logging.info(f"Scheduler started for daily motivation at {NOTIFICATION_TIME}")
+    logging.info(f"Scheduler set up for daily motivation at {NOTIFICATION_TIME}")
 
-# Main function
+# Run the bot
 async def main():
     setup_database()
-    await setup_scheduler()
+    await dp.start_polling(bot)
 
-    try:
-        await dp.start_polling(bot)
-    except KeyboardInterrupt:
-        logging.info("Bot polling stopped by user")
-    finally:
-        await bot.session.close()
-
-if __name__ == "__main__":
+if __name__ == '__main__':
+    logging.info("Starting bot...")
     asyncio.run(main())
