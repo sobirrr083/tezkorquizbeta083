@@ -95,17 +95,17 @@ def setup_database():
 # Main keyboard for private chats
 def get_main_keyboard():
     builder = ReplyKeyboardBuilder()
-    builder.row(types.KeyboardButton(text="Yordam 🆘"), types.KeyboardButton(text="Biz haqimizda ℹ️"))
-    builder.row(types.KeyboardButton(text="Kanal 📢"), types.KeyboardButton(text="Guruh 👥"))
-    builder.row(types.KeyboardButton(text="Web-sayt 🌐"), types.KeyboardButton(text="AI bilan suhbat 🤖"))
-    builder.row(types.KeyboardButton(text="Motivatsiya qo'shish ✨"))
+    builder.row(types.KeyboardButton(text="🆘 Yordam"), types.KeyboardButton(text="ℹ️ Biz haqimizda"))
+    builder.row(types.KeyboardButton(text="📢 Kanal"), types.KeyboardButton(text="👥 Guruh"))
+    builder.row(types.KeyboardButton(text="🌐 Web-sayt"), types.KeyboardButton(text=" 🤖 AI bilan suhbat"))
+    builder.row(types.KeyboardButton(text="✨ Motivatsiya qo'shish"))
     return builder.as_markup(resize_keyboard=True)
 
 # Group keyboard
 def get_group_keyboard():
     builder = ReplyKeyboardBuilder()
-    builder.row(types.KeyboardButton(text="Botga kirish 🚀"))
-    builder.row(types.KeyboardButton(text="Bot haqida ℹ️"))
+    builder.row(types.KeyboardButton(text="🚀 Botga kirish"))
+    builder.row(types.KeyboardButton(text="ℹ️ Bot haqida"))
     return builder.as_markup(resize_keyboard=True)
 
 # Back keyboard
@@ -140,7 +140,7 @@ def get_subscription_keyboard():
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="Kanalga a'zo bo'lish", url=f"https://t.me/{CHANNEL_ID.replace('@', '')}"))
     builder.row(InlineKeyboardButton(text="Guruhga qo'shilish", url=f"https://t.me/{GROUP_ID.replace('@', '')}"))
-    builder.row(InlineKeyboardButton(text="Tekshirish ✅", callback_data="check_subscription"))
+    builder.row(InlineKeyboardButton(text="✅ Tekshirish", callback_data="check_subscription"))
     return builder.as_markup()
 
 # Command handlers
@@ -752,11 +752,11 @@ async def admin_stats(callback_query: types.CallbackQuery):
     )
 
 # Handle simple messages
-@dp.message(lambda message: message.text == "Yordam 🆘" and message.chat.type == 'private')
+@dp.message(lambda message: message.text == "🆘 Yordam" and message.chat.type == 'private')
 async def help_button(message: types.Message):
     await cmd_help(message)
 
-@dp.message(lambda message: message.text == "Biz haqimizda ℹ️" and message.chat.type == 'private')
+@dp.message(lambda message: message.text == "ℹ️ Biz haqimizda" and message.chat.type == 'private')
 async def about_button(message: types.Message):
     user_id = message.from_user.id
     
@@ -793,7 +793,7 @@ async def about_button(message: types.Message):
     )
     await message.answer(about_text, reply_markup=get_main_keyboard())
 
-@dp.message(lambda message: message.text == "Kanal 📢" and message.chat.type == 'private')
+@dp.message(lambda message: message.text == "📢 Kanal" and message.chat.type == 'private')
 async def channel_button(message: types.Message):
     channel_link = f"https://t.me/{CHANNEL_ID.replace('@', '')}"
     
@@ -805,7 +805,7 @@ async def channel_button(message: types.Message):
         reply_markup=channel_keyboard.as_markup()
     )
 
-@dp.message(lambda message: message.text == "Guruh 👥" and message.chat.type == 'private')
+@dp.message(lambda message: message.text == "👥 Guruh" and message.chat.type == 'private')
 async def group_button(message: types.Message):
     group_link = f"https://t.me/{GROUP_ID.replace('@', '')}"
     
@@ -817,7 +817,7 @@ async def group_button(message: types.Message):
         reply_markup=group_keyboard.as_markup()
     )
 
-@dp.message(lambda message: message.text == "Web-sayt 🌐" and message.chat.type == 'private')
+@dp.message(lambda message: message.text == "🌐 Web-sayt" and message.chat.type == 'private')
 async def website_button(message: types.Message):
     website_keyboard = InlineKeyboardBuilder()
     website_keyboard.row(InlineKeyboardButton(text="Web-saytga o'tish", url=WEBSITE_URL))
@@ -827,7 +827,7 @@ async def website_button(message: types.Message):
         reply_markup=website_keyboard.as_markup()
     )
 
-@dp.message(lambda message: message.text == "AI bilan suhbat 🤖" and message.chat.type == 'private')
+@dp.message(lambda message: message.text == "🤖 AI bilan suhbat" and message.chat.type == 'private')
 async def ai_chat_button(message: types.Message, state: FSMContext):
     await cmd_ai(message, state)
 
@@ -839,7 +839,7 @@ async def back_button(message: types.Message, state: FSMContext):
     
     await message.answer("Asosiy menyu:", reply_markup=get_main_keyboard())
 
-@dp.message(lambda message: message.text == "Botga kirish 🚀" and message.chat.type in ['group', 'supergroup'])
+@dp.message(lambda message: message.text == "🚀 Botga kirish" and message.chat.type in ['group', 'supergroup'])
 async def start_from_group(message: types.Message):
     bot_username = (await bot.me()).username
     
@@ -851,7 +851,7 @@ async def start_from_group(message: types.Message):
         reply_markup=keyboard.as_markup()
     )
 
-@dp.message(lambda message: message.text == "Bot haqida ℹ️" and message.chat.type in ['group', 'supergroup'])
+@dp.message(lambda message: message.text == "ℹ️ Bot haqida" and message.chat.type in ['group', 'supergroup'])
 async def about_from_group(message: types.Message):
     bot_username = (await bot.me()).username
     
