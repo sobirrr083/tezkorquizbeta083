@@ -13,6 +13,9 @@ from aiogram.fsm.state import State, StatesGroup
 import google.generativeai as genai
 import sqlite3
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from datetime import datetime
+import pytz
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -52,42 +55,52 @@ def setup_database():
     cursor = conn.cursor()
 
     cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS users
-                   (
-                       user_id INTEGER PRIMARY KEY,
-                       username TEXT,
-                       first_name TEXT,
-                       last_name TEXT,
-                       joined_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                       is_subscribed_channel BOOLEAN DEFAULT FALSE,
-                       is_subscribed_group BOOLEAN DEFAULT FALSE
-                   )
-                   ''')
+        CREATE TABLE IF NOT EXISTS users
+        (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            joined_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_subscribed_channel BOOLEAN DEFAULT FALSE,
+            is_subscribed_group BOOLEAN DEFAULT FALSE,
+            receive_daily_motivation BOOLEAN DEFAULT TRUE
+        )
+    ''')
+
+    # Add receive_daily_motivation column if it doesn't exist
+    try:
+        cursor.execute('''
+            ALTER TABLE users
+            ADD COLUMN receive_daily_motivation BOOLEAN DEFAULT TRUE
+        ''')
+    except sqlite3.OperationalError:
+        pass  # Column already exists
 
     cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS motivations
-                   (
-                       id INTEGER PRIMARY KEY AUTOINCREMENT,
-                       text TEXT NOT NULL,
-                       submitted_by INTEGER,
-                       status TEXT DEFAULT 'pending',
-                       likes INTEGER DEFAULT 0,
-                       shares INTEGER DEFAULT 0,
-                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                       FOREIGN KEY (submitted_by) REFERENCES users (user_id)
-                   )
-                   ''')
+        CREATE TABLE IF NOT EXISTS motivations
+        (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            submitted_by INTEGER,
+            status TEXT DEFAULT 'pending',
+            likes INTEGER DEFAULT 0,
+            shares INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (submitted_by) REFERENCES users (user_id)
+        )
+    ''')
 
     cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS motivation_likes
-                   (
-                       user_id INTEGER,
-                       motivation_id INTEGER,
-                       PRIMARY KEY (user_id, motivation_id),
-                       FOREIGN KEY (user_id) REFERENCES users (user_id),
-                       FOREIGN KEY (motivation_id) REFERENCES motivations (id)
-                   )
-                   ''')
+        CREATE TABLE IF NOT EXISTS motivation_likes
+        (
+            user_id INTEGER,
+            motivation_id INTEGER,
+            PRIMARY KEY (user_id, motivation_id),
+            FOREIGN KEY (user_id) REFERENCES users (user_id),
+            FOREIGN KEY (motivation_id) REFERENCES motivations (id)
+        )
+    ''')
 
     conn.commit()
     conn.close()
@@ -97,8 +110,8 @@ def get_main_keyboard():
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🆘 Yordam"), types.KeyboardButton(text="ℹ️ Biz haqimizda"))
     builder.row(types.KeyboardButton(text="📢 Kanal"), types.KeyboardButton(text="👥 Guruh"))
-    builder.row(types.KeyboardButton(text="🌐 Web-sayt"), types.KeyboardButton(text=" 🤖 AI bilan suhbat"))
-    builder.row(types.KeyboardButton(text="✨ Motivatsiya qo'shish"))
+    builder.row(types.KeyboardButton(text="🌐 Web-sayt"), types.KeyboardButton(text="🤖 AI bilan suhbat"))
+    builder.row(types.KeyboardButton(text="✨ Motivatsiya qo'shish"), types.KeyboardButton(text="📅 Kunlik motivatsiya"))
     return builder.as_markup(resize_keyboard=True)
 
 # Group keyboard
@@ -370,7 +383,9 @@ async def process_broadcast(message: types.Message, state: FSMContext):
             elif message.document:
                 await bot.send_document(user_id[0], message.document.file_id, caption=message.caption)
             else:
-                await bot.send_message(user_id[0], message.text)
+                await bot.send_message(user_id[
+
+0], message.text)
             sent_count += 1
             await asyncio.sleep(0.05)
         except Exception as e:
@@ -381,9 +396,10 @@ async def process_broadcast(message: types.Message, state: FSMContext):
                         reply_markup=get_main_keyboard())
     await state.clear()
 
-@dp.message(lambda message: message.text == "Motivatsiya qo'shish ✨" and message.chat.type == 'private')
+@dp.message(lambda message: message.text == "✨ Motivatsiya qo'shish" and message.chat.type == 'private')
 async def add_motivation(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+    logging.info(f"User {user_id} clicked 'Motivatsiya qo'shish'")
 
     if user_id in ADMIN_IDS:
         await state.set_state(Form.waiting_for_motivation)
@@ -392,7 +408,6 @@ async def add_motivation(message: types.Message, state: FSMContext):
         return
 
     is_subscribed = await check_subscription(user_id)
-
     if not is_subscribed:
         await message.answer("Botdan foydalanish uchun kanal va guruhga a'zo bo'ling:",
                              reply_markup=get_subscription_keyboard())
@@ -411,17 +426,24 @@ async def process_motivation(message: types.Message, state: FSMContext):
 
     user_id = message.from_user.id
     motivation_text = message.text
+    logging.info(f"User {user_id} submitted motivation: {motivation_text}")
 
-    conn = sqlite3.connect('bot_database.db')
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO motivations (text, submitted_by, status) VALUES (?, ?, ?)",
-                   (motivation_text, user_id, "pending"))
-    motivation_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('bot_database.db')
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO motivations (text, submitted_by, status) VALUES (?, ?, ?)",
+                       (motivation_text, user_id, "pending"))
+        motivation_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        logging.info(f"Motivation #{motivation_id} inserted into database")
+    except Exception as e:
+        logging.error(f"Database error while inserting motivation: {e}")
+        await message.answer("Xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring.", reply_markup=get_main_keyboard())
+        await state.clear()
+        return
 
     await message.answer("Rahmat! Motivatsiyangiz ko'rib chiqish uchun yuborildi.", reply_markup=get_main_keyboard())
-    await state.clear()
 
     approval_keyboard = InlineKeyboardBuilder()
     approval_keyboard.row(
@@ -429,26 +451,30 @@ async def process_motivation(message: types.Message, state: FSMContext):
         InlineKeyboardButton(text="❌ Rad etish", callback_data=f"reject_motivation_{motivation_id}")
     )
 
+    notification_text = (
+        f"Yangi motivatsiya taklifi #{motivation_id}:\n\n"
+        f"{motivation_text}\n\n"
+        f"Foydalanuvchi: {message.from_user.full_name} (ID: {user_id})"
+    )
+
     if MOTIVATION_GROUP_ID:
         try:
             await bot.send_message(
                 MOTIVATION_GROUP_ID,
-                f"Yangi motivatsiya taklifi #{motivation_id}:\n\n"
-                f"{motivation_text}\n\n"
-                f"Foydalanuvchi: {message.from_user.full_name} (ID: {user_id})",
+                notification_text,
                 reply_markup=approval_keyboard.as_markup()
             )
+            logging.info(f"Sent motivation #{motivation_id} to motivation group {MOTIVATION_GROUP_ID}")
         except Exception as e:
-            logging.error(f"Failed to send to motivation group: {e}")
+            logging.error(f"Failed to send to motivation group {MOTIVATION_GROUP_ID}: {e}")
             for admin_id in ADMIN_IDS:
                 try:
                     await bot.send_message(
                         admin_id,
-                        f"Yangi motivatsiya taklifi #{motivation_id}:\n\n"
-                        f"{motivation_text}\n\n"
-                        f"Foydalanuvchi: {message.from_user.full_name} (ID: {user_id})",
+                        notification_text,
                         reply_markup=approval_keyboard.as_markup()
                     )
+                    logging.info(f"Sent motivation #{motivation_id} to admin {admin_id}")
                 except Exception as admin_e:
                     logging.error(f"Failed to notify admin {admin_id}: {admin_e}")
     else:
@@ -456,13 +482,14 @@ async def process_motivation(message: types.Message, state: FSMContext):
             try:
                 await bot.send_message(
                     admin_id,
-                    f"Yangi motivatsiya taklifi #{motivation_id}:\n\n"
-                    f"{motivation_text}\n\n"
-                    f"Foydalanuvchi: {message.from_user.full_name} (ID: {user_id})",
+                    notification_text,
                     reply_markup=approval_keyboard.as_markup()
                 )
+                logging.info(f"Sent motivation #{motivation_id} to admin {admin_id}")
             except Exception as e:
                 logging.error(f"Failed to notify admin {admin_id}: {e}")
+
+    await state.clear()
 
 @dp.callback_query(lambda c: c.data.startswith("approve_motivation_"))
 async def approve_motivation(callback_query: types.CallbackQuery):
@@ -751,6 +778,37 @@ async def admin_stats(callback_query: types.CallbackQuery):
         stats_text
     )
 
+@dp.message(lambda message: message.text == "📅 Kunlik motivatsiya" and message.chat.type == 'private')
+async def toggle_daily_motivation(message: types.Message):
+    user_id = message.from_user.id
+
+    if user_id not in ADMIN_IDS:
+        is_subscribed = await check_subscription(user_id)
+        if not is_subscribed:
+            await message.answer("Kunlik motivatsiyalarga obuna bo'lish uchun kanal va guruhga a'zo bo'ling:",
+                                 reply_markup=get_subscription_keyboard())
+            return
+
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT receive_daily_motivation FROM users WHERE user_id = ?", (user_id,))
+    result = cursor.fetchone()
+
+    if result is None:
+        await message.answer("Xatolik yuz berdi. Iltimos, /start buyrug'ini qayta ishlatib ko'ring.")
+        conn.close()
+        return
+
+    current_status = result[0]
+    new_status = not current_status
+
+    cursor.execute("UPDATE users SET receive_daily_motivation = ? WHERE user_id = ?", (new_status, user_id))
+    conn.commit()
+    conn.close()
+
+    status_text = "obuna bo'ldingiz" if new_status else "obunadan chiqdingiz"
+    await message.answer(f"Kunlik motivatsiyalarga {status_text}.", reply_markup=get_main_keyboard())
+
 # Handle simple messages
 @dp.message(lambda message: message.text == "🆘 Yordam" and message.chat.type == 'private')
 async def help_button(message: types.Message):
@@ -820,7 +878,7 @@ async def group_button(message: types.Message):
 @dp.message(lambda message: message.text == "🌐 Web-sayt" and message.chat.type == 'private')
 async def website_button(message: types.Message):
     website_keyboard = InlineKeyboardBuilder()
-    website_keyboard.row(InlineKeyboardButton(text="Web-saytga o'tish", url=WEBSITE_URL))
+    website_keyboard.row(InlineKeyboardButton(text="Web-saytga o'tish", user_id=message.from_user.id))
     
     await message.answer(
         "Bizning rasmiy web-saytimizga tashrif buyuring!",
@@ -874,6 +932,7 @@ async def about_from_group(message: types.Message):
 # Daily motivation function
 async def send_daily_motivation():
     try:
+        logging.info("Starting daily motivation task...")
         conn = sqlite3.connect('bot_database.db')
         cursor = conn.cursor()
         
@@ -888,8 +947,8 @@ async def send_daily_motivation():
         
         motivation_id, motivation_text = motivation
         
-        # Get users who are subscribed to both channel and group
-        cursor.execute("SELECT user_id FROM users WHERE is_subscribed_channel = 1 AND is_subscribed_group = 1")
+        # Get users who are subscribed to both channel and group and want daily motivations
+        cursor.execute("SELECT user_id FROM users WHERE is_subscribed_channel = 1 AND is_subscribed_group = 1 AND receive_daily_motivation = 1")
         subscribed_users = cursor.fetchall()
         
         conn.close()
@@ -916,7 +975,7 @@ async def send_daily_motivation():
             try:
                 await bot.send_message(user[0], daily_text, reply_markup=keyboard.as_markup())
                 sent_count += 1
-                await asyncio.sleep(0.05)  # To avoid flood limits
+                await asyncio.sleep(0.05)  # Avoid flood limits
             except Exception as e:
                 logging.error(f"Failed to send daily motivation to {user[0]}: {e}")
                 failed_count += 1
@@ -926,22 +985,27 @@ async def send_daily_motivation():
     except Exception as e:
         logging.error(f"Error in daily motivation function: {e}")
 
-# Setup scheduler
+# Setup scheduler with timezone
 async def setup_scheduler():
-    scheduler = AsyncIOScheduler()
+    scheduler = AsyncIOScheduler(timezone="Asia/Tashkent")
     
     # Parse notification time
     hour, minute = map(int, NOTIFICATION_TIME.split(':'))
     
-    scheduler.add_job(send_daily_motivation, 'cron', hour=hour, minute=minute)
+    # Schedule daily motivation at specified time in Asia/Tashkent timezone
+    scheduler.add_job(
+        send_daily_motivation,
+        CronTrigger(hour=hour, minute=minute, timezone="Asia/Tashkent")
+    )
     scheduler.start()
-    logging.info(f"Scheduler set up for daily motivation at {NOTIFICATION_TIME}")
+    logging.info(f"Scheduler set up for daily motivation at {NOTIFICATION_TIME} Asia/Tashkent")
 
 # Run the bot
 async def main():
     setup_database()
+    await setup_scheduler()  # Ensure scheduler is started
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
-    logging.info("Bot ishga tushdi vanihoyat...")
+    logging.info("Bot ishga tushdi...")
     asyncio.run(main())
