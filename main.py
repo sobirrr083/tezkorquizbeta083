@@ -3,7 +3,7 @@ import logging
 import asyncio
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
-from aiogram import 
+from aiogram import F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
