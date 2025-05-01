@@ -218,8 +218,8 @@ async def cmd_admin(message: types.Message):
         return
 
     admin_keyboard = InlineKeyboardBuilder()
-    admin_keyboard.row(InlineKeyboardButton(text="Xabar yuborish 📢", callback_data="admin_broadcast"))
-    admin_keyboard.row(InlineKeyboardButton(text="Statistika 📊", callback_data="admin_stats"))
+    admin_keyboard.row(InlineKeyboardButton(text="📢 Xabar yuborish", callback_data="admin_broadcast"))
+    admin_keyboard.row(InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats"))
 
     await message.answer(
         "Assalomu alaykum, admin! Quyidagi imkoniyatlardan foydalaning:",
@@ -274,7 +274,7 @@ async def cmd_ai(message: types.Message, state: FSMContext):
 
     if user_id in ADMIN_IDS:
         await state.set_state(Form.waiting_for_ai_query)
-        await message.answer("Gemini AI bilan suhbatni boshladingiz. Savolingizni yozing (chiqish uchun /stop):",
+        await message.answer("Tezkor Quiz AI bilan suhbatni boshladingiz. Savolingizni yozing (chiqish uchun /stop):",
                              reply_markup=get_back_keyboard())
         return
 
