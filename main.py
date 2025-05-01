@@ -106,12 +106,25 @@ def setup_database():
     conn.close()
 
 # Main keyboard for private chats
-def get_main_keyboard():
+def get_main_keyboard(user_id=None):
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🆘 Yordam"), types.KeyboardButton(text="ℹ️ Biz haqimizda"))
     builder.row(types.KeyboardButton(text="📢 Kanal"), types.KeyboardButton(text="👥 Guruh"))
     builder.row(types.KeyboardButton(text="🌐 Web-sayt"), types.KeyboardButton(text="🤖 AI bilan suhbat"))
-    builder.row(types.KeyboardButton(text="✨ Motivatsiya qo'shish"), types.KeyboardButton(text="📅 Kunlik motivatsiya"))
+    
+    # Dynamic button for motivation subscription
+    if user_id:
+        conn = sqlite3.connect('bot_database.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT receive_daily_motivation FROM users WHERE user_id = ?", (user_id,))
+        result = cursor.fetchone()
+        conn.close()
+        is_subscribed = result[0] if result else False
+        button_text = "📅 Obunani bekor qilish" if is_subscribed else "📅 Motivatsiyaga obuna bo'lish"
+    else:
+        button_text = "📅 Motivatsiyaga obuna bo'lish"
+    
+    builder.row(types.KeyboardButton(text="✨ Motivatsiya qo'shish"), types.KeyboardButton(text=button_text))
     return builder.as_markup(resize_keyboard=True)
 
 # Group keyboard
@@ -189,7 +202,7 @@ async def cmd_start(message: types.Message):
             "- Kunlik motivatsiya olish beta\n"
             "- Kanallar va guruhlar bilan ishlash\n\n"
             "Quyidagi tugmalar orqali kerakli bo'limlarni tanlang:",
-            reply_markup=get_main_keyboard()
+            reply_markup=get_main_keyboard(user_id)
         )
         return
 
@@ -203,7 +216,7 @@ async def cmd_start(message: types.Message):
             "- Kunlik motivatsiya olish beta\n"
             "- Kanallar va guruhlar bilan ishlash\n\n"
             "Quyidagi tugmalar orqali kerakli bo'limlarni tanlang:",
-            reply_markup=get_main_keyboard()
+            reply_markup=get_main_keyboard(user_id)
         )
     else:
         await message.answer(
@@ -216,7 +229,7 @@ async def cmd_stop(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(
         "Bot to'xtatildi. Qayta ishga tushirish uchun /start ni bosing.",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(message.from_user.id)
     )
 
 @dp.message(Command("admin"), lambda message: message.chat.type == 'private')
@@ -226,7 +239,7 @@ async def cmd_admin(message: types.Message):
     if user_id not in ADMIN_IDS:
         await message.answer(
             "Bu buyruq faqat adminlar uchun.",
-            reply_markup=get_main_keyboard()
+            reply_markup=get_main_keyboard(user_id)
         )
         return
 
@@ -313,7 +326,7 @@ async def process_subscription_check(callback_query: types.CallbackQuery):
             callback_query.from_user.id,
             f"Tabriklaymiz! Siz muvaffaqiyatli a'zo bo'ldingiz.\n"
             "Endi botimizdan to'liq foydalanishingiz mumkin!",
-            reply_markup=get_main_keyboard()
+            reply_markup=get_main_keyboard(callback_query.from_user.id)
         )
     else:
         await callback_query.answer("Siz kanal va guruhga to'liq a'zo bo'lmagansiz!", show_alert=True)
@@ -329,7 +342,7 @@ async def keep_typing(chat_id):
 async def process_ai_query(message: types.Message, state: FSMContext):
     if message.text == "/stop" or message.text == "🔙 Ortga qaytish":
         await state.clear()
-        await message.answer("AI bilan suhbat tugadi. Asosiy menyu:", reply_markup=get_main_keyboard())
+        await message.answer("AI bilan suhbat tugadi. Asosiy menyu:", reply_markup=get_main_keyboard(message.from_user.id))
         return
 
     typing_task = asyncio.create_task(keep_typing(message.chat.id))
@@ -346,7 +359,7 @@ async def process_ai_query(message: types.Message, state: FSMContext):
 @dp.message(Command("broadcast"), lambda message: message.chat.type == 'private')
 async def cmd_broadcast(message: types.Message, state: FSMContext):
     if message.from_user.id not in ADMIN_IDS:
-        await message.answer("Bu buyruq faqat adminlar uchun.", reply_markup=get_main_keyboard())
+        await message.answer("Bu buyruq faqat adminlar uchun.", reply_markup=get_main_keyboard(message.from_user.id))
         return
 
     await state.set_state(Form.waiting_for_broadcast)
@@ -360,7 +373,7 @@ async def process_broadcast(message: types.Message, state: FSMContext):
 
     if message.text == "/stop" or message.text == "🔙 Ortga qaytish":
         await state.clear()
-        await message.answer("Xabar yuborish bekor qilindi.", reply_markup=get_main_keyboard())
+        await message.answer("Xabar yuborish bekor qilindi.", reply_markup=get_main_keyboard(message.from_user.id))
         return
 
     conn = sqlite3.connect('bot_database.db')
@@ -383,9 +396,7 @@ async def process_broadcast(message: types.Message, state: FSMContext):
             elif message.document:
                 await bot.send_document(user_id[0], message.document.file_id, caption=message.caption)
             else:
-                await bot.send_message(user_id[
-
-0], message.text)
+                await bot.send_message(user_id[0], message.text)
             sent_count += 1
             await asyncio.sleep(0.05)
         except Exception as e:
@@ -393,7 +404,7 @@ async def process_broadcast(message: types.Message, state: FSMContext):
             failed_count += 1
 
     await message.answer(f"Xabar yuborildi: {sent_count} muvaffaqiyatli, {failed_count} muvaffaqiyatsiz",
-                        reply_markup=get_main_keyboard())
+                        reply_markup=get_main_keyboard(message.from_user.id))
     await state.clear()
 
 @dp.message(lambda message: message.text == "✨ Motivatsiya qo'shish" and message.chat.type == 'private')
@@ -421,11 +432,12 @@ async def add_motivation(message: types.Message, state: FSMContext):
 async def process_motivation(message: types.Message, state: FSMContext):
     if message.text == "/stop" or message.text == "🔙 Ortga qaytish":
         await state.clear()
-        await message.answer("Bekor qilindi.", reply_markup=get_main_keyboard())
+        await message.answer("Bekor qilindi.", reply_markup=get_main_keyboard(message.from_user.id))
         return
 
     user_id = message.from_user.id
     motivation_text = message.text
+    username = f"@{message.from_user.username}" if message.from_user.username else "Noma'lum"
     logging.info(f"User {user_id} submitted motivation: {motivation_text}")
 
     try:
@@ -439,11 +451,11 @@ async def process_motivation(message: types.Message, state: FSMContext):
         logging.info(f"Motivation #{motivation_id} inserted into database")
     except Exception as e:
         logging.error(f"Database error while inserting motivation: {e}")
-        await message.answer("Xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring.", reply_markup=get_main_keyboard())
+        await message.answer("Xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring.", reply_markup=get_main_keyboard(message.from_user.id))
         await state.clear()
         return
 
-    await message.answer("Rahmat! Motivatsiyangiz ko'rib chiqish uchun yuborildi.", reply_markup=get_main_keyboard())
+    await message.answer("Rahmat! Motivatsiyangiz ko'rib chiqish uchun yuborildi.", reply_markup=get_main_keyboard(message.from_user.id))
 
     approval_keyboard = InlineKeyboardBuilder()
     approval_keyboard.row(
@@ -454,7 +466,9 @@ async def process_motivation(message: types.Message, state: FSMContext):
     notification_text = (
         f"Yangi motivatsiya taklifi #{motivation_id}:\n\n"
         f"{motivation_text}\n\n"
-        f"Foydalanuvchi: {message.from_user.full_name} (ID: {user_id})"
+        f"Foydalanuvchi: {message.from_user.full_name}\n"
+        f"ID: {user_id}\n"
+        f"Username: {username}"
     )
 
     if MOTIVATION_GROUP_ID:
@@ -586,7 +600,7 @@ async def edit_motivation_command(callback_query: types.CallbackQuery, state: FS
 async def process_motivation_edit(message: types.Message, state: FSMContext):
     if message.text == "/stop" or message.text == "🔙 Ortga qaytish":
         await state.clear()
-        await message.answer("Tahrirlash bekor qilindi.", reply_markup=get_main_keyboard())
+        await message.answer("Tahrirlash bekor qilindi.", reply_markup=get_main_keyboard(message.from_user.id))
         return
 
     data = await state.get_data()
@@ -594,7 +608,7 @@ async def process_motivation_edit(message: types.Message, state: FSMContext):
 
     if not motivation_id:
         await state.clear()
-        await message.answer("Xatolik yuz berdi.", reply_markup=get_main_keyboard())
+        await message.answer("Xatolik yuz berdi.", reply_markup=get_main_keyboard(message.from_user.id))
         return
 
     conn = sqlite3.connect('bot_database.db')
@@ -603,7 +617,7 @@ async def process_motivation_edit(message: types.Message, state: FSMContext):
     conn.commit()
     conn.close()
 
-    await message.answer(f"Motivatsiya #{motivation_id} muvaffaqiyatli tahrirlandi.", reply_markup=get_main_keyboard())
+    await message.answer(f"Motivatsiya #{motivation_id} muvaffaqiyatli tahrirlandi.", reply_markup=get_main_keyboard(message.from_user.id))
     await state.clear()
 
 @dp.callback_query(lambda c: c.data.startswith("delete_motivation_"))
@@ -670,7 +684,7 @@ async def like_motivation(callback_query: types.CallbackQuery):
                 callback_query.message.chat.id,
                 callback_query.message.message_id,
                 reply_markup=keyboard.as_markup()
-            )
+@uxt)
             await callback_query.answer(f"Like {like_action}")
         except Exception as e:
             logging.error(f"Failed to update likes: {e}")
@@ -778,7 +792,7 @@ async def admin_stats(callback_query: types.CallbackQuery):
         stats_text
     )
 
-@dp.message(lambda message: message.text == "📅 Kunlik motivatsiya" and message.chat.type == 'private')
+@dp.message(lambda message: message.text in ["📅 Motivatsiyaga obuna bo'lish", "📅 Obunani bekor qilish"] and message.chat.type == 'private')
 async def toggle_daily_motivation(message: types.Message):
     user_id = message.from_user.id
 
@@ -807,7 +821,7 @@ async def toggle_daily_motivation(message: types.Message):
     conn.close()
 
     status_text = "obuna bo'ldingiz" if new_status else "obunadan chiqdingiz"
-    await message.answer(f"Kunlik motivatsiyalarga {status_text}.", reply_markup=get_main_keyboard())
+    await message.answer(f"Kunlik motivatsiyalarga {status_text}.", reply_markup=get_main_keyboard(user_id))
 
 # Handle simple messages
 @dp.message(lambda message: message.text == "🆘 Yordam" and message.chat.type == 'private')
@@ -829,7 +843,7 @@ async def about_button(message: types.Message):
             "- Kunlik motivatsiyalar olish\n\n"
             "Bizning kanalimizga a'zo bo'ling va guruhimizga qo'shiling!"
         )
-        await message.answer(about_text, reply_markup=get_main_keyboard())
+        await message.answer(about_text, reply_markup=get_main_keyboard(user_id))
         return
     
     is_subscribed = await check_subscription(user_id)
@@ -849,7 +863,7 @@ async def about_button(message: types.Message):
         "- Kunlik motivatsiyalar olish\n\n"
         "Bizning kanalimizga a'zo bo'ling va guruhimizga qo'shiling!"
     )
-    await message.answer(about_text, reply_markup=get_main_keyboard())
+    await message.answer(about_text, reply_markup=get_main_keyboard(user_id))
 
 @dp.message(lambda message: message.text == "📢 Kanal" and message.chat.type == 'private')
 async def channel_button(message: types.Message):
@@ -878,7 +892,7 @@ async def group_button(message: types.Message):
 @dp.message(lambda message: message.text == "🌐 Web-sayt" and message.chat.type == 'private')
 async def website_button(message: types.Message):
     website_keyboard = InlineKeyboardBuilder()
-    website_keyboard.row(InlineKeyboardButton(text="Web-saytga o'tish", user_id=message.from_user.id))
+    website_keyboard.row(InlineKeyboardButton(text="Web-saytga o'tish", url=WEBSITE_URL))
     
     await message.answer(
         "Bizning rasmiy web-saytimizga tashrif buyuring!",
@@ -895,7 +909,7 @@ async def back_button(message: types.Message, state: FSMContext):
     if current_state:
         await state.clear()
     
-    await message.answer("Asosiy menyu:", reply_markup=get_main_keyboard())
+    await message.answer("Asosiy menyu:", reply_markup=get_main_keyboard(message.from_user.id))
 
 @dp.message(lambda message: message.text == "🚀 Botga kirish" and message.chat.type in ['group', 'supergroup'])
 async def start_from_group(message: types.Message):
