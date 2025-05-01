@@ -172,8 +172,8 @@ async def cmd_start(message: types.Message):
         await message.answer(
             f"Assalomu alaykum, {first_name}! Admin sifatida botga xush kelibsiz.\n\n"
             "Bot imkoniyatlari:\n"
-            "- Gemini AI bilan suhbatlashish\n"
-            "- Kunlik motivatsiya olish\n"
+            "- Tezkor Quiz AI bilan suhbatlashish\n"
+            "- Kunlik motivatsiya olish beta\n"
             "- Kanallar va guruhlar bilan ishlash\n\n"
             "Quyidagi tugmalar orqali kerakli bo'limlarni tanlang:",
             reply_markup=get_main_keyboard()
@@ -186,8 +186,8 @@ async def cmd_start(message: types.Message):
         await message.answer(
             f"Assalomu alaykum, {first_name}! Botimizga xush kelibsiz.\n\n"
             "Bot imkoniyatlari:\n"
-            "- Gemini AI bilan suhbatlashish\n"
-            "- Kunlik motivatsiya olish\n"
+            "- Tezkor Quiz AI bilan suhbatlashish\n"
+            "- Kunlik motivatsiya olish beta\n"
             "- Kanallar va guruhlar bilan ishlash\n\n"
             "Quyidagi tugmalar orqali kerakli bo'limlarni tanlang:",
             reply_markup=get_main_keyboard()
@@ -239,7 +239,7 @@ async def cmd_help(message: types.Message):
             "/ai - Sun'iy intellekt bilan muloqot\n"
             "/admin - Admin paneli\n\n"
             "👇 Asosiy imkoniyatlar:\n"
-            "- Gemini AI bilan suhbatlashish\n"
+            "- Tezkor Quiz AI bilan suhbatlashish\n"
             "- Kunlik motivatsiya olish\n"
             "- Motivatsiya qo'shish\n"
             "- Kanal va guruh yangiliklari"
@@ -261,7 +261,7 @@ async def cmd_help(message: types.Message):
         "/yordam - Yordam olish\n"
         "/ai - Sun'iy intellekt bilan muloqot\n\n"
         "👇 Asosiy imkoniyatlar:\n"
-        "- Gemini AI bilan suhbatlashish\n"
+        "- Tezkor Quiz AI bilan suhbatlashish\n"
         "- Kunlik motivatsiya olish\n"
         "- Motivatsiya qo'shish\n"
         "- Kanal va guruh yangiliklari"
@@ -286,7 +286,7 @@ async def cmd_ai(message: types.Message, state: FSMContext):
         return
 
     await state.set_state(Form.waiting_for_ai_query)
-    await message.answer("Gemini AI bilan suhbatni boshladingiz. Savolingizni yozing (chiqish uchun /stop):",
+    await message.answer("Tezkor Quiz AI bilan suhbatni boshladingiz. Savolingizni yozing (chiqish uchun /stop):",
                          reply_markup=get_back_keyboard())
 
 # Callback handlers
@@ -327,7 +327,7 @@ async def process_ai_query(message: types.Message, state: FSMContext):
         await message.answer(response.text, reply_markup=get_back_keyboard())
     except Exception as e:
         typing_task.cancel()
-        logging.error(f"Gemini AI error: {e}")
+        logging.error(f"Tezkor Quiz AI da xatolik error: {e}")
         await message.answer("Xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring.", reply_markup=get_back_keyboard())
 
 @dp.message(Command("broadcast"), lambda message: message.chat.type == 'private')
@@ -374,7 +374,7 @@ async def process_broadcast(message: types.Message, state: FSMContext):
             sent_count += 1
             await asyncio.sleep(0.05)
         except Exception as e:
-            logging.error(f"Failed to send message to {user_id[0]}: {e}")
+            logging.error(f"Xabar yuborishda xatolik {user_id[0]}: {e}")
             failed_count += 1
 
     await message.answer(f"Xabar yuborildi: {sent_count} muvaffaqiyatli, {failed_count} muvaffaqiyatsiz",
@@ -763,10 +763,10 @@ async def about_button(message: types.Message):
     if user_id in ADMIN_IDS:
         about_text = (
             "ℹ️ Bot haqida ma'lumot:\n\n"
-            "Bu bot Gemini AI orqali sun'iy intellekt imkoniyatlarini taqdim etadi.\n"
+            "Bu bot Tezkor Quiz AI orqali sun'iy intellekt imkoniyatlarini taqdim etadi.\n"
             "Shuningdek, motivatsion fikrlar almashinuvini qo'llab-quvvatlaydi.\n\n"
             "Asosiy imkoniyatlar:\n"
-            "- Gemini AI bilan suhbatlashish\n"
+            "- Tezkor Quiz AI bilan suhbatlashish\n"
             "- Motivatsion fikrlar qo'shish va ulashish\n"
             "- Kunlik motivatsiyalar olish\n\n"
             "Bizning kanalimizga a'zo bo'ling va guruhimizga qo'shiling!"
@@ -783,10 +783,10 @@ async def about_button(message: types.Message):
     
     about_text = (
         "ℹ️ Bot haqida ma'lumot:\n\n"
-        "Bu bot Gemini AI orqali sun'iy intellekt imkoniyatlarini taqdim etadi.\n"
+        "Bu bot Tezkor Quiz AI orqali sun'iy intellekt imkoniyatlarini taqdim etadi.\n"
         "Shuningdek, motivatsion fikrlar almashinuvini qo'llab-quvvatlaydi.\n\n"
         "Asosiy imkoniyatlar:\n"
-        "- Gemini AI bilan suhbatlashish\n"
+        "- Tezkor Quiz AI bilan suhbatlashish\n"
         "- Motivatsion fikrlar qo'shish va ulashish\n"
         "- Kunlik motivatsiyalar olish\n\n"
         "Bizning kanalimizga a'zo bo'ling va guruhimizga qo'shiling!"
@@ -860,10 +860,10 @@ async def about_from_group(message: types.Message):
     
     about_text = (
         "ℹ️ Bot haqida ma'lumot:\n\n"
-        "Bu bot Gemini AI orqali sun'iy intellekt imkoniyatlarini taqdim etadi.\n"
+        "Bu bot Tezkor Quiz AI orqali sun'iy intellekt imkoniyatlarini taqdim etadi.\n"
         "Shuningdek, motivatsion fikrlar almashinuvini qo'llab-quvvatlaydi.\n\n"
         "Asosiy imkoniyatlar:\n"
-        "- Gemini AI bilan suhbatlashish\n"
+        "- Tezkor Quiz AI bilan suhbatlashish\n"
         "- Motivatsion fikrlar qo'shish va ulashish\n"
         "- Kunlik motivatsiyalar olish\n\n"
         "Botdan foydalanish uchun quyidagi havolaga o'ting:"
@@ -943,5 +943,5 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
-    logging.info("Starting bot...")
+    logging.info("Bot ishga tushdi vanihoyat...")
     asyncio.run(main())
