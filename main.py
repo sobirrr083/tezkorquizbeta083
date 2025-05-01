@@ -14,7 +14,7 @@ import google.generativeai as genai
 import sqlite3
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 
 # Configure logging
@@ -62,20 +62,38 @@ def setup_database():
             first_name TEXT,
             last_name TEXT,
             joined_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             is_subscribed_channel BOOLEAN DEFAULT FALSE,
             is_subscribed_group BOOLEAN DEFAULT FALSE,
-            receive_daily_motivation BOOLEAN DEFAULT TRUE
+            receive_daily_motivation BOOLEAN DEFAULT TRUE,
+            is_active BOOLEAN DEFAULT TRUE
         )
     ''')
 
-    # Add receive_daily_motivation column if it doesn't exist
+    # Add new columns if they don't exist
+    try:
+        cursor.execute('''
+            ALTER TABLE users
+            ADD COLUMN last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ''')
+    except sqlite3.OperationalError:
+        pass
+
     try:
         cursor.execute('''
             ALTER TABLE users
             ADD COLUMN receive_daily_motivation BOOLEAN DEFAULT TRUE
         ''')
     except sqlite3.OperationalError:
-        pass  # Column already exists
+        pass
+
+    try:
+        cursor.execute('''
+            ALTER TABLE users
+            ADD COLUMN is_active BOOLEAN DEFAULT TRUE
+        ''')
+    except sqlite3.OperationalError:
+        pass
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS motivations
@@ -104,6 +122,18 @@ def setup_database():
 
     conn.commit()
     conn.close()
+
+# Update last active timestamp for a user
+def update_last_active(user_id):
+    try:
+        conn = sqlite3.connect('bot_database.db')
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET last_active = ? WHERE user_id = ?",
+                       (datetime.now(pytz.timezone("Asia/Tashkent")).strftime('%Y-%m-%d %H:%M:%S'), user_id))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.error(f"Error updating last_active for user {user_id}: {e}")
 
 # Main keyboard for private chats
 def get_main_keyboard(user_id=None):
@@ -185,6 +215,8 @@ async def cmd_start(message: types.Message):
     conn.commit()
     conn.close()
 
+    update_last_active(user_id)
+
     # Group chat
     if message.chat.type in ['group', 'supergroup']:
         await message.answer(
@@ -226,15 +258,18 @@ async def cmd_start(message: types.Message):
 
 @dp.message(Command("stop"), lambda message: message.chat.type == 'private')
 async def cmd_stop(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    update_last_active(user_id)
     await state.clear()
     await message.answer(
         "Bot to'xtatildi. Qayta ishga tushirish uchun /start ni bosing.",
-        reply_markup=get_main_keyboard(message.from_user.id)
+        reply_markup=get_main_keyboard(user_id)
     )
 
 @dp.message(Command("admin"), lambda message: message.chat.type == 'private')
 async def cmd_admin(message: types.Message):
     user_id = message.from_user.id
+    update_last_active(user_id)
 
     if user_id not in ADMIN_IDS:
         await message.answer(
@@ -246,6 +281,7 @@ async def cmd_admin(message: types.Message):
     admin_keyboard = InlineKeyboardBuilder()
     admin_keyboard.row(InlineKeyboardButton(text="📢 Xabar yuborish", callback_data="admin_broadcast"))
     admin_keyboard.row(InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats"))
+    admin_keyboard.row(InlineKeyboardButton(text="📋 Barcha motivatsiyalar", callback_data="admin_view_motivations"))
 
     await message.answer(
         "Assalomu alaykum, admin! Quyidagi imkoniyatlardan foydalaning:",
@@ -255,6 +291,7 @@ async def cmd_admin(message: types.Message):
 @dp.message(Command("yordam"), lambda message: message.chat.type == 'private')
 async def cmd_help(message: types.Message):
     user_id = message.from_user.id
+    update_last_active(user_id)
 
     if user_id in ADMIN_IDS:
         help_text = (
@@ -297,6 +334,7 @@ async def cmd_help(message: types.Message):
 @dp.message(Command("ai"), lambda message: message.chat.type == 'private')
 async def cmd_ai(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+    update_last_active(user_id)
 
     if user_id in ADMIN_IDS:
         await state.set_state(Form.waiting_for_ai_query)
@@ -318,15 +356,18 @@ async def cmd_ai(message: types.Message, state: FSMContext):
 # Callback handlers
 @dp.callback_query(lambda c: c.data == "check_subscription")
 async def process_subscription_check(callback_query: types.CallbackQuery):
-    is_subscribed = await check_subscription(callback_query.from_user.id)
+    user_id = callback_query.from_user.id
+    update_last_active(user_id)
+
+    is_subscribed = await check_subscription(user_id)
 
     if is_subscribed:
         await bot.delete_message(callback_query.message.chat.id, callback_query.message.message_id)
         await bot.send_message(
-            callback_query.from_user.id,
+            user_id,
             f"Tabriklaymiz! Siz muvaffaqiyatli a'zo bo'ldingiz.\n"
             "Endi botimizdan to'liq foydalanishingiz mumkin!",
-            reply_markup=get_main_keyboard(callback_query.from_user.id)
+            reply_markup=get_main_keyboard(user_id)
         )
     else:
         await callback_query.answer("Siz kanal va guruhga to'liq a'zo bo'lmagansiz!", show_alert=True)
@@ -340,9 +381,12 @@ async def keep_typing(chat_id):
 # Message handlers for private chats
 @dp.message(Form.waiting_for_ai_query)
 async def process_ai_query(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    update_last_active(user_id)
+
     if message.text == "/stop" or message.text == "🔙 Ortga qaytish":
         await state.clear()
-        await message.answer("AI bilan suhbat tugadi. Asosiy menyu:", reply_markup=get_main_keyboard(message.from_user.id))
+        await message.answer("AI bilan suhbat tugadi. Asosiy menyu:", reply_markup=get_main_keyboard(user_id))
         return
 
     typing_task = asyncio.create_task(keep_typing(message.chat.id))
@@ -358,8 +402,11 @@ async def process_ai_query(message: types.Message, state: FSMContext):
 
 @dp.message(Command("broadcast"), lambda message: message.chat.type == 'private')
 async def cmd_broadcast(message: types.Message, state: FSMContext):
-    if message.from_user.id not in ADMIN_IDS:
-        await message.answer("Bu buyruq faqat adminlar uchun.", reply_markup=get_main_keyboard(message.from_user.id))
+    user_id = message.from_user.id
+    update_last_active(user_id)
+
+    if user_id not in ADMIN_IDS:
+        await message.answer("Bu buyruq faqat adminlar uchun.", reply_markup=get_main_keyboard(user_id))
         return
 
     await state.set_state(Form.waiting_for_broadcast)
@@ -367,18 +414,21 @@ async def cmd_broadcast(message: types.Message, state: FSMContext):
 
 @dp.message(Form.waiting_for_broadcast)
 async def process_broadcast(message: types.Message, state: FSMContext):
-    if message.from_user.id not in ADMIN_IDS:
+    user_id = message.from_user.id
+    update_last_active(user_id)
+
+    if user_id not in ADMIN_IDS:
         await state.clear()
         return
 
     if message.text == "/stop" or message.text == "🔙 Ortga qaytish":
         await state.clear()
-        await message.answer("Xabar yuborish bekor qilindi.", reply_markup=get_main_keyboard(message.from_user.id))
+        await message.answer("Xabar yuborish bekor qilindi.", reply_markup=get_main_keyboard(user_id))
         return
 
     conn = sqlite3.connect('bot_database.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM users")
+    cursor.execute("SELECT user_id FROM users WHERE is_active = 1")
     users = cursor.fetchall()
     conn.close()
 
@@ -404,12 +454,13 @@ async def process_broadcast(message: types.Message, state: FSMContext):
             failed_count += 1
 
     await message.answer(f"Xabar yuborildi: {sent_count} muvaffaqiyatli, {failed_count} muvaffaqiyatsiz",
-                        reply_markup=get_main_keyboard(message.from_user.id))
+                        reply_markup=get_main_keyboard(user_id))
     await state.clear()
 
 @dp.message(lambda message: message.text == "✨ Motivatsiya qo'shish" and message.chat.type == 'private')
 async def add_motivation(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+    update_last_active(user_id)
     logging.info(f"User {user_id} clicked 'Motivatsiya qo'shish'")
 
     if user_id in ADMIN_IDS:
@@ -430,12 +481,14 @@ async def add_motivation(message: types.Message, state: FSMContext):
 
 @dp.message(Form.waiting_for_motivation)
 async def process_motivation(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    update_last_active(user_id)
+
     if message.text == "/stop" or message.text == "🔙 Ortga qaytish":
         await state.clear()
-        await message.answer("Bekor qilindi.", reply_markup=get_main_keyboard(message.from_user.id))
+        await message.answer("Bekor qilindi.", reply_markup=get_main_keyboard(user_id))
         return
 
-    user_id = message.from_user.id
     motivation_text = message.text
     username = f"@{message.from_user.username}" if message.from_user.username else "Noma'lum"
     logging.info(f"User {user_id} submitted motivation: {motivation_text}")
@@ -451,11 +504,11 @@ async def process_motivation(message: types.Message, state: FSMContext):
         logging.info(f"Motivation #{motivation_id} inserted into database")
     except Exception as e:
         logging.error(f"Database error while inserting motivation: {e}")
-        await message.answer("Xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring.", reply_markup=get_main_keyboard(message.from_user.id))
+        await message.answer("Xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring.", reply_markup=get_main_keyboard(user_id))
         await state.clear()
         return
 
-    await message.answer("Rahmat! Motivatsiyangiz ko'rib chiqish uchun yuborildi.", reply_markup=get_main_keyboard(message.from_user.id))
+    await message.answer("Rahmat! Motivatsiyangiz ko'rib chiqish uchun yuborildi.", reply_markup=get_main_keyboard(user_id))
 
     approval_keyboard = InlineKeyboardBuilder()
     approval_keyboard.row(
@@ -522,13 +575,31 @@ async def approve_motivation(callback_query: types.CallbackQuery):
     conn.close()
 
     if motivation:
+        motivation_text, submitted_by = motivation
         try:
             await bot.send_message(
-                motivation[1],
-                f"Tabriklaymiz! Sizning motivatsiyangiz tasdiqlandi:\n\n{motivation[0]}"
+                submitted_by,
+                f"Tabriklaymiz! Sizning motivatsiyangiz tasdiqlandi:\n\n{motivation_text}"
             )
         except Exception as e:
-            logging.error(f"Failed to notify user {motivation[1]}: {e}")
+            logging.error(f"Failed to notify user {submitted_by}: {e}")
+
+        # Send to motivation group if MOTIVATION_GROUP_ID is set
+        if MOTIVATION_GROUP_ID:
+            try:
+                keyboard = InlineKeyboardBuilder()
+                keyboard.row(
+                    InlineKeyboardButton(text="👍", callback_data=f"like_motivation_{motivation_id}"),
+                    InlineKeyboardButton(text="🔄 Ulashish", callback_data=f"share_motivation_{motivation_id}")
+                )
+                await bot.send_message(
+                    MOTIVATION_GROUP_ID,
+                    f"✅ Tasdiqlangan motivatsiya #{motivation_id}:\n\n{motivation_text}",
+                    reply_markup=keyboard.as_markup()
+                )
+                logging.info(f"Approved motivation #{motivation_id} sent to motivation group {MOTIVATION_GROUP_ID}")
+            except Exception as e:
+                logging.error(f"Failed to send approved motivation to group {MOTIVATION_GROUP_ID}: {e}")
 
         edit_keyboard = InlineKeyboardBuilder()
         edit_keyboard.row(
@@ -538,7 +609,7 @@ async def approve_motivation(callback_query: types.CallbackQuery):
 
         await bot.edit_message_text(
             f"✅ TASDIQLANGAN: Motivatsiya #{motivation_id}:\n\n"
-            f"{motivation[0]}\n\n"
+            f"{motivation_text}\n\n"
             f"Admin: {callback_query.from_user.full_name}",
             callback_query.message.chat.id,
             callback_query.message.message_id,
@@ -598,9 +669,12 @@ async def edit_motivation_command(callback_query: types.CallbackQuery, state: FS
 
 @dp.message(Form.waiting_for_motivation_approval)
 async def process_motivation_edit(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    update_last_active(user_id)
+
     if message.text == "/stop" or message.text == "🔙 Ortga qaytish":
         await state.clear()
-        await message.answer("Tahrirlash bekor qilindi.", reply_markup=get_main_keyboard(message.from_user.id))
+        await message.answer("Tahrirlash bekor qilindi.", reply_markup=get_main_keyboard(user_id))
         return
 
     data = await state.get_data()
@@ -608,7 +682,7 @@ async def process_motivation_edit(message: types.Message, state: FSMContext):
 
     if not motivation_id:
         await state.clear()
-        await message.answer("Xatolik yuz berdi.", reply_markup=get_main_keyboard(message.from_user.id))
+        await message.answer("Xatolik yuz berdi.", reply_markup=get_main_keyboard(user_id))
         return
 
     conn = sqlite3.connect('bot_database.db')
@@ -617,7 +691,7 @@ async def process_motivation_edit(message: types.Message, state: FSMContext):
     conn.commit()
     conn.close()
 
-    await message.answer(f"Motivatsiya #{motivation_id} muvaffaqiyatli tahrirlandi.", reply_markup=get_main_keyboard(message.from_user.id))
+    await message.answer(f"Motivatsiya #{motivation_id} muvaffaqiyatli tahrirlandi.", reply_markup=get_main_keyboard(user_id))
     await state.clear()
 
 @dp.callback_query(lambda c: c.data.startswith("delete_motivation_"))
@@ -644,8 +718,10 @@ async def delete_motivation(callback_query: types.CallbackQuery):
 
 @dp.callback_query(lambda c: c.data.startswith("like_motivation_"))
 async def like_motivation(callback_query: types.CallbackQuery):
-    motivation_id = int(callback_query.data.split("_")[2])
     user_id = callback_query.from_user.id
+    update_last_active(user_id)
+
+    motivation_id = int(callback_query.data.split("_")[2])
 
     conn = sqlite3.connect('bot_database.db')
     cursor = conn.cursor()
@@ -665,18 +741,18 @@ async def like_motivation(callback_query: types.CallbackQuery):
         cursor.execute("UPDATE motivations SET likes = likes + 1 WHERE id = ?", (motivation_id,))
         like_action = "qo'shildi"
 
-    cursor.execute("SELECT text, likes FROM motivations WHERE id = ?", (motivation_id,))
+    cursor.execute("SELECT text, likes, shares FROM motivations WHERE id = ?", (motivation_id,))
     motivation = cursor.fetchone()
     conn.commit()
     conn.close()
 
     if motivation:
-        motivation_text, likes_count = motivation
+        motivation_text, likes_count, shares_count = motivation
 
         keyboard = InlineKeyboardBuilder()
         keyboard.row(
             InlineKeyboardButton(text=f"👍 ({likes_count})", callback_data=f"like_motivation_{motivation_id}"),
-            InlineKeyboardButton(text="🔄 Ulashish", callback_data=f"share_motivation_{motivation_id}")
+            InlineKeyboardButton(text=f"🔄 Ulashish ({shares_count})", callback_data=f"share_motivation_{motivation_id}")
         )
 
         try:
@@ -684,7 +760,7 @@ async def like_motivation(callback_query: types.CallbackQuery):
                 callback_query.message.chat.id,
                 callback_query.message.message_id,
                 reply_markup=keyboard.as_markup()
-@uxt)
+            )
             await callback_query.answer(f"Like {like_action}")
         except Exception as e:
             logging.error(f"Failed to update likes: {e}")
@@ -692,6 +768,9 @@ async def like_motivation(callback_query: types.CallbackQuery):
 
 @dp.callback_query(lambda c: c.data.startswith("share_motivation_"))
 async def share_motivation(callback_query: types.CallbackQuery):
+    user_id = callback_query.from_user.id
+    update_last_active(user_id)
+
     motivation_id = int(callback_query.data.split("_")[2])
     
     conn = sqlite3.connect('bot_database.db')
@@ -729,33 +808,61 @@ async def share_motivation(callback_query: types.CallbackQuery):
 
 @dp.callback_query(lambda c: c.data == "admin_broadcast")
 async def admin_broadcast_command(callback_query: types.CallbackQuery, state: FSMContext):
-    if callback_query.from_user.id not in ADMIN_IDS:
+    user_id = callback_query.from_user.id
+    update_last_active(user_id)
+
+    if user_id not in ADMIN_IDS:
         await callback_query.answer("Bu harakat faqat adminlar uchun", show_alert=True)
         return
     
     await state.set_state(Form.waiting_for_broadcast)
     await callback_query.answer()
     await bot.send_message(
-        callback_query.from_user.id,
+        user_id,
         "Barcha foydalanuvchilarga yuboriladigan xabarni kiriting:",
         reply_markup=get_back_keyboard()
     )
 
 @dp.callback_query(lambda c: c.data == "admin_stats")
 async def admin_stats(callback_query: types.CallbackQuery):
-    if callback_query.from_user.id not in ADMIN_IDS:
+    user_id = callback_query.from_user.id
+    update_last_active(user_id)
+
+    if user_id not in ADMIN_IDS:
         await callback_query.answer("Bu harakat faqat adminlar uchun", show_alert=True)
         return
     
     conn = sqlite3.connect('bot_database.db')
     cursor = conn.cursor()
     
+    # Total users
     cursor.execute("SELECT COUNT(*) FROM users")
     total_users = cursor.fetchone()[0]
     
+    # Subscribed users
     cursor.execute("SELECT COUNT(*) FROM users WHERE is_subscribed_channel = 1 AND is_subscribed_group = 1")
     subscribed_users = cursor.fetchone()[0]
     
+    # Active users (daily, weekly, monthly)
+    now = datetime.now(pytz.timezone("Asia/Tashkent"))
+    one_day_ago = (now - timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
+    one_week_ago = (now - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+    one_month_ago = (now - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+
+    cursor.execute("SELECT COUNT(*) FROM users WHERE last_active >= ? AND is_active = 1", (one_day_ago,))
+    daily_active = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM users WHERE last_active >= ? AND is_active = 1", (one_week_ago,))
+    weekly_active = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM users WHERE last_active >= ? AND is_active = 1", (one_month_ago,))
+    monthly_active = cursor.fetchone()[0]
+    
+    # Inactive users
+    cursor.execute("SELECT COUNT(*) FROM users WHERE is_active = 0")
+    inactive_users = cursor.fetchone()[0]
+    
+    # Motivation stats
     cursor.execute("SELECT COUNT(*) FROM motivations WHERE status = 'approved'")
     approved_motivations = cursor.fetchone()[0]
     
@@ -777,7 +884,11 @@ async def admin_stats(callback_query: types.CallbackQuery):
         "📊 Bot statistikasi:\n\n"
         f"👤 Jami foydalanuvchilar: {total_users}\n"
         f"✅ A'zo bo'lganlar: {subscribed_users}\n"
-        f"📢 A'zo bo'lmaganlar: {total_users - subscribed_users}\n\n"
+        f"📢 A'zo bo'lmaganlar: {total_users - subscribed_users}\n"
+        f"🕒 Kunlik faol foydalanuvchilar: {daily_active}\n"
+        f"🕔 Haftalik faol foydalanuvchilar: {weekly_active}\n"
+        f"🕕 Oylik faol foydalanuvchilar: {monthly_active}\n"
+        f"🚫 Botdan chiqib ketganlar: {inactive_users}\n\n"
         f"✨ Jami motivatsiyalar: {total_motivations}\n"
         f"✅ Tasdiqlangan: {approved_motivations}\n"
         f"⏳ Kutilmoqda: {pending_motivations}\n"
@@ -788,13 +899,82 @@ async def admin_stats(callback_query: types.CallbackQuery):
     
     await callback_query.answer()
     await bot.send_message(
-        callback_query.from_user.id,
+        user_id,
         stats_text
     )
+
+@dp.callback_query(lambda c: c.data == "admin_view_motivations")
+async def admin_view_motivations(callback_query: types.CallbackQuery):
+    user_id = callback_query.from_user.id
+    update_last_active(user_id)
+
+    if user_id not in ADMIN_IDS:
+        await callback_query.answer("Bu harakat faqat adminlar uchun", show_alert=True)
+        return
+
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT m.id, m.text, m.status, m.likes, m.shares, m.submitted_by, 
+               u.first_name, u.last_name, u.username 
+        FROM motivations m
+        LEFT JOIN users u ON m.submitted_by = u.user_id
+        ORDER BY m.created_at DESC
+    ''')
+    motivations = cursor.fetchall()
+    conn.close()
+
+    if not motivations:
+        await bot.send_message(
+            user_id,
+            "Hozircha motivatsiyalar mavjud emas."
+        )
+        await callback_query.answer()
+        return
+
+    for motivation in motivations:
+        motivation_id, text, status, likes, shares, submitted_by, first_name, last_name, username = motivation
+        full_name = f"{first_name} {last_name}".strip() or "Noma'lum"
+        username = f"@{username}" if username else "Noma'lum"
+
+        status_text = {
+            "pending": "⏳ Kutilmoqda",
+            "approved": "✅ Tasdiqlangan",
+            "rejected": "❌ Rad etilgan"
+        }.get(status, "Noma'lum")
+
+        motivation_text = (
+            f"Motivatsiya #{motivation_id}:\n\n"
+            f"📝 Matn: {text}\n"
+            f"📊 Status: {status_text}\n"
+            f"👍 Like'lar: {likes}\n"
+            f"🔄 Ulashishlar: {shares}\n"
+            f"👤 Yuborgan: {full_name}\n"
+            f"🆔 ID: {submitted_by}\n"
+            f"🌐 Username: {username}"
+        )
+
+        keyboard = InlineKeyboardBuilder()
+        keyboard.row(
+            InlineKeyboardButton(text="✏️ Tahrirlash", callback_data=f"edit_motivation_{motivation_id}"),
+            InlineKeyboardButton(text="🗑️ O'chirish", callback_data=f"delete_motivation_{motivation_id}")
+        )
+
+        try:
+            await bot.send_message(
+                user_id,
+                motivation_text,
+                reply_markup=keyboard.as_markup()
+            )
+        except Exception as e:
+            logging.error(f"Failed to send motivation #{motivation_id} to admin {user_id}: {e}")
+
+    await callback_query.answer()
 
 @dp.message(lambda message: message.text in ["📅 Motivatsiyaga obuna bo'lish", "📅 Obunani bekor qilish"] and message.chat.type == 'private')
 async def toggle_daily_motivation(message: types.Message):
     user_id = message.from_user.id
+    update_last_active(user_id)
 
     if user_id not in ADMIN_IDS:
         is_subscribed = await check_subscription(user_id)
@@ -826,11 +1006,14 @@ async def toggle_daily_motivation(message: types.Message):
 # Handle simple messages
 @dp.message(lambda message: message.text == "🆘 Yordam" and message.chat.type == 'private')
 async def help_button(message: types.Message):
+    user_id = message.from_user.id
+    update_last_active(user_id)
     await cmd_help(message)
 
 @dp.message(lambda message: message.text == "ℹ️ Biz haqimizda" and message.chat.type == 'private')
 async def about_button(message: types.Message):
     user_id = message.from_user.id
+    update_last_active(user_id)
     
     if user_id in ADMIN_IDS:
         about_text = (
@@ -867,6 +1050,9 @@ async def about_button(message: types.Message):
 
 @dp.message(lambda message: message.text == "📢 Kanal" and message.chat.type == 'private')
 async def channel_button(message: types.Message):
+    user_id = message.from_user.id
+    update_last_active(user_id)
+
     channel_link = f"https://t.me/{CHANNEL_ID.replace('@', '')}"
     
     channel_keyboard = InlineKeyboardBuilder()
@@ -879,6 +1065,9 @@ async def channel_button(message: types.Message):
 
 @dp.message(lambda message: message.text == "👥 Guruh" and message.chat.type == 'private')
 async def group_button(message: types.Message):
+    user_id = message.from_user.id
+    update_last_active(user_id)
+
     group_link = f"https://t.me/{GROUP_ID.replace('@', '')}"
     
     group_keyboard = InlineKeyboardBuilder()
@@ -891,6 +1080,9 @@ async def group_button(message: types.Message):
 
 @dp.message(lambda message: message.text == "🌐 Web-sayt" and message.chat.type == 'private')
 async def website_button(message: types.Message):
+    user_id = message.from_user.id
+    update_last_active(user_id)
+
     website_keyboard = InlineKeyboardBuilder()
     website_keyboard.row(InlineKeyboardButton(text="Web-saytga o'tish", url=WEBSITE_URL))
     
@@ -901,18 +1093,26 @@ async def website_button(message: types.Message):
 
 @dp.message(lambda message: message.text == "🤖 AI bilan suhbat" and message.chat.type == 'private')
 async def ai_chat_button(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    update_last_active(user_id)
     await cmd_ai(message, state)
 
 @dp.message(lambda message: message.text == "🔙 Ortga qaytish" and message.chat.type == 'private')
 async def back_button(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    update_last_active(user_id)
+
     current_state = await state.get_state()
     if current_state:
         await state.clear()
     
-    await message.answer("Asosiy menyu:", reply_markup=get_main_keyboard(message.from_user.id))
+    await message.answer("Asosiy menyu:", reply_markup=get_main_keyboard(user_id))
 
 @dp.message(lambda message: message.text == "🚀 Botga kirish" and message.chat.type in ['group', 'supergroup'])
 async def start_from_group(message: types.Message):
+    user_id = message.from_user.id
+    update_last_active(user_id)
+
     bot_username = (await bot.me()).username
     
     keyboard = InlineKeyboardBuilder()
@@ -925,6 +1125,9 @@ async def start_from_group(message: types.Message):
 
 @dp.message(lambda message: message.text == "ℹ️ Bot haqida" and message.chat.type in ['group', 'supergroup'])
 async def about_from_group(message: types.Message):
+    user_id = message.from_user.id
+    update_last_active(user_id)
+
     bot_username = (await bot.me()).username
     
     keyboard = InlineKeyboardBuilder()
@@ -962,7 +1165,7 @@ async def send_daily_motivation():
         motivation_id, motivation_text = motivation
         
         # Get users who are subscribed to both channel and group and want daily motivations
-        cursor.execute("SELECT user_id FROM users WHERE is_subscribed_channel = 1 AND is_subscribed_group = 1 AND receive_daily_motivation = 1")
+        cursor.execute("SELECT user_id FROM users WHERE is_subscribed_channel = 1 AND is_subscribed_group = 1 AND receive_daily_motivation = 1 AND is_active = 1")
         subscribed_users = cursor.fetchall()
         
         conn.close()
@@ -1013,6 +1216,22 @@ async def setup_scheduler():
     )
     scheduler.start()
     logging.info(f"Scheduler set up for daily motivation at {NOTIFICATION_TIME} Asia/Tashkent")
+
+# Detect blocked users
+@dp.errors()
+async def handle_errors(update: types.Update, exception: Exception):
+    if isinstance(exception, types.errors.TelegramAPIError) and "blocked by user" in str(exception).lower():
+        user_id = update.message.from_user.id if update.message else update.callback_query.from_user.id
+        try:
+            conn = sqlite3.connect('bot_database.db')
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET is_active = 0 WHERE user_id = ?", (user_id,))
+            conn.commit()
+            conn.close()
+            logging.info(f"User {user_id} marked as inactive (blocked bot)")
+        except Exception as e:
+            logging.error(f"Error marking user {user_id} as inactive: {e}")
+    return True
 
 # Run the bot
 async def main():
