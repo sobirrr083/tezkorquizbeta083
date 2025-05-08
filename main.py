@@ -1,4 +1,3 @@
-
 import os
 import logging
 import asyncio
@@ -960,8 +959,7 @@ async def admin_view_motivations(callback_query: types.CallbackQuery):
             "rejected": "❌ Rad etilgan"
         }.get(status, "Noma'lum")
 
-        motivation_text =
-        
+        motivation_text = (
             f"Motivatsiya #{motivation_id}:\n\n"
             f"📝 Matn: {text}\n"
             f"📊 Status: {status_text}\n"
@@ -970,7 +968,7 @@ async def admin_view_motivations(callback_query: types.CallbackQuery):
             f"👤 Yuborgan: {full_name}\n"
             f"🆔 ID: {submitted_by}\n"
             f"🌐 Username: {username}"
-        
+        )
 
         keyboard = InlineKeyboardBuilder()
         keyboard.row(
