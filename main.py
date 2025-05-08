@@ -1,16 +1,15 @@
 import os
 import logging
 import asyncio
+import requests  # Added for HTTP requests
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
-from aiogram import F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-import google.generativeai as genai
 import sqlite3
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -23,7 +22,7 @@ logging.basicConfig(level=logging.INFO)
 # Load environment variables
 load_dotenv()
 
-# Bot token from environment variables
+# Bot token and API keys from environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "").split(",")))
@@ -33,9 +32,8 @@ MOTIVATION_GROUP_ID = os.getenv("MOTIVATION_GROUP_ID")
 WEBSITE_URL = os.getenv("WEBSITE_URL")
 NOTIFICATION_TIME = os.getenv("NOTIFICATION_TIME", "08:00")
 
-# Configure Gemini AI
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-pro')
+# Gemini-2.0-Flash API endpoint
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
 # Initialize bot and dispatcher
 bot = Bot(token=BOT_TOKEN)
@@ -49,7 +47,7 @@ class Form(StatesGroup):
     waiting_for_motivation = State()
     waiting_for_motivation_approval = State()
 
-# Database setup
+# Database setup (unchanged)
 def setup_database():
     conn = sqlite3.connect('bot_database.db')
     cursor = conn.cursor()
@@ -70,7 +68,6 @@ def setup_database():
         )
     ''')
 
-    # Add new columns if they don't exist
     try:
         cursor.execute('''
             ALTER TABLE users
@@ -123,7 +120,7 @@ def setup_database():
     conn.commit()
     conn.close()
 
-# Update last active timestamp for a user
+# Update last active timestamp for a user (unchanged)
 def update_last_active(user_id):
     try:
         conn = sqlite3.connect('bot_database.db')
@@ -135,14 +132,13 @@ def update_last_active(user_id):
     except Exception as e:
         logging.error(f"Error updating last_active for user {user_id}: {e}")
 
-# Main keyboard for private chats
+# Main keyboard for private chats (unchanged)
 def get_main_keyboard(user_id=None):
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🆘 Yordam"), types.KeyboardButton(text="ℹ️ Biz haqimizda"))
     builder.row(types.KeyboardButton(text="📢 Kanal"), types.KeyboardButton(text="👥 Guruh"))
     builder.row(types.KeyboardButton(text="🌐 Web-sayt"), types.KeyboardButton(text="🤖 AI bilan suhbat"))
     
-    # Dynamic button for motivation subscription
     if user_id:
         conn = sqlite3.connect('bot_database.db')
         cursor = conn.cursor()
@@ -157,20 +153,20 @@ def get_main_keyboard(user_id=None):
     builder.row(types.KeyboardButton(text="✨ Motivatsiya qo'shish"), types.KeyboardButton(text=button_text))
     return builder.as_markup(resize_keyboard=True)
 
-# Group keyboard
+# Group keyboard (unchanged)
 def get_group_keyboard():
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🚀 Botga kirish"))
     builder.row(types.KeyboardButton(text="ℹ️ Bot haqida"))
     return builder.as_markup(resize_keyboard=True)
 
-# Back keyboard
+# Back keyboard (unchanged)
 def get_back_keyboard():
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🔙 Ortga qaytish"))
     return builder.as_markup(resize_keyboard=True)
 
-# Check subscription
+# Check subscription (unchanged)
 async def check_subscription(user_id):
     try:
         channel_status = await bot.get_chat_member(CHANNEL_ID, user_id)
@@ -191,7 +187,7 @@ async def check_subscription(user_id):
         logging.error(f"Error checking subscription: {e}")
         return False
 
-# Subscription keyboard
+# Subscription keyboard (unchanged)
 def get_subscription_keyboard():
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="Kanalga a'zo bo'lish", url=f"https://t.me/{CHANNEL_ID.replace('@', '')}"))
@@ -199,7 +195,35 @@ def get_subscription_keyboard():
     builder.row(InlineKeyboardButton(text="✅ Tekshirish", callback_data="check_subscription"))
     return builder.as_markup()
 
-# Command handlers
+# Function to query Gemini-2.0-Flash API
+async def query_gemini_flash(prompt):
+    headers = {
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
+    }
+    try:
+        response = requests.post(
+            f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+            headers=headers,
+            json=payload
+        )
+        response.raise_for_status()
+        data = response.json()
+        # Extract the generated text from the response
+        if "candidates" in data and data["candidates"]:
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        else:
+            logging.error("No valid response from Gemini-2.0-Flash API")
+            return "Javob olishda xatolik yuz berdi."
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error querying Gemini-2.0-Flash API: {e}")
+        return "Xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring."
+
+# Command handlers (unchanged except where noted)
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
@@ -207,7 +231,6 @@ async def cmd_start(message: types.Message):
     first_name = message.from_user.first_name
     last_name = message.from_user.last_name
 
-    # Add user to database
     conn = sqlite3.connect('bot_database.db')
     cursor = conn.cursor()
     cursor.execute("INSERT OR IGNORE INTO users (user_id, username, first_name, last_name) VALUES (?, ?, ?, ?)",
@@ -217,7 +240,6 @@ async def cmd_start(message: types.Message):
 
     update_last_active(user_id)
 
-    # Group chat
     if message.chat.type in ['group', 'supergroup']:
         await message.answer(
             f"Assalomu alaykum, {first_name}! Guruhda bot bilan ishlash uchun quyidagi tugmalardan foydalaning:",
@@ -225,7 +247,6 @@ async def cmd_start(message: types.Message):
         )
         return
 
-    # Private chat
     if user_id in ADMIN_IDS:
         await message.answer(
             f"Assalomu alaykum, {first_name}! Admin sifatida botga xush kelibsiz.\n\n"
@@ -353,7 +374,7 @@ async def cmd_ai(message: types.Message, state: FSMContext):
     await message.answer("Tezkor Quiz AI bilan suhbatni boshladingiz. Savolingizni yozing (chiqish uchun /stop):",
                          reply_markup=get_back_keyboard())
 
-# Callback handlers
+# Callback handlers (unchanged)
 @dp.callback_query(lambda c: c.data == "check_subscription")
 async def process_subscription_check(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
@@ -372,13 +393,13 @@ async def process_subscription_check(callback_query: types.CallbackQuery):
     else:
         await callback_query.answer("Siz kanal va guruhga to'liq a'zo bo'lmagansiz!", show_alert=True)
 
-# Keep typing action for long responses
+# Keep typing action for long responses (unchanged)
 async def keep_typing(chat_id):
     while True:
         await bot.send_chat_action(chat_id, "typing")
         await asyncio.sleep(5)
 
-# Message handlers for private chats
+# Updated AI query handler
 @dp.message(Form.waiting_for_ai_query)
 async def process_ai_query(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -392,14 +413,15 @@ async def process_ai_query(message: types.Message, state: FSMContext):
     typing_task = asyncio.create_task(keep_typing(message.chat.id))
 
     try:
-        response = model.generate_content(message.text)
+        response_text = await query_gemini_flash(message.text)
         typing_task.cancel()
-        await message.answer(response.text, reply_markup=get_back_keyboard())
+        await message.answer(response_text, reply_markup=get_back_keyboard())
     except Exception as e:
         typing_task.cancel()
-        logging.error(f"Tezkor Quiz AI da xatolik error: {e}")
+        logging.error(f"Error in Gemini-2.0-Flash query: {e}")
         await message.answer("Xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring.", reply_markup=get_back_keyboard())
 
+# Remaining handlers (unchanged)
 @dp.message(Command("broadcast"), lambda message: message.chat.type == 'private')
 async def cmd_broadcast(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -584,7 +606,6 @@ async def approve_motivation(callback_query: types.CallbackQuery):
         except Exception as e:
             logging.error(f"Failed to notify user {submitted_by}: {e}")
 
-        # Send to motivation group if MOTIVATION_GROUP_ID is set
         if MOTIVATION_GROUP_ID:
             try:
                 keyboard = InlineKeyboardBuilder()
@@ -797,7 +818,6 @@ async def share_motivation(callback_query: types.CallbackQuery):
                 reply_markup=keyboard.as_markup()
             )
             
-            # Create share link
             share_text = f"📢 Motivatsiya:\n\n{motivation_text}\n\n👉 @{(await bot.me()).username}"
             share_url = f"https://t.me/share/url?url={WEBSITE_URL}&text={share_text}"
             
@@ -835,15 +855,12 @@ async def admin_stats(callback_query: types.CallbackQuery):
     conn = sqlite3.connect('bot_database.db')
     cursor = conn.cursor()
     
-    # Total users
     cursor.execute("SELECT COUNT(*) FROM users")
     total_users = cursor.fetchone()[0]
     
-    # Subscribed users
     cursor.execute("SELECT COUNT(*) FROM users WHERE is_subscribed_channel = 1 AND is_subscribed_group = 1")
     subscribed_users = cursor.fetchone()[0]
     
-    # Active users (daily, weekly, monthly)
     now = datetime.now(pytz.timezone("Asia/Tashkent"))
     one_day_ago = (now - timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
     one_week_ago = (now - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
@@ -858,11 +875,9 @@ async def admin_stats(callback_query: types.CallbackQuery):
     cursor.execute("SELECT COUNT(*) FROM users WHERE last_active >= ? AND is_active = 1", (one_month_ago,))
     monthly_active = cursor.fetchone()[0]
     
-    # Inactive users
     cursor.execute("SELECT COUNT(*) FROM users WHERE is_active = 0")
     inactive_users = cursor.fetchone()[0]
     
-    # Motivation stats
     cursor.execute("SELECT COUNT(*) FROM motivations WHERE status = 'approved'")
     approved_motivations = cursor.fetchone()[0]
     
@@ -1003,7 +1018,6 @@ async def toggle_daily_motivation(message: types.Message):
     status_text = "obuna bo'ldingiz" if new_status else "obunadan chiqdingiz"
     await message.answer(f"Kunlik motivatsiyalarga {status_text}.", reply_markup=get_main_keyboard(user_id))
 
-# Handle simple messages
 @dp.message(lambda message: message.text == "🆘 Yordam" and message.chat.type == 'private')
 async def help_button(message: types.Message):
     user_id = message.from_user.id
@@ -1146,14 +1160,13 @@ async def about_from_group(message: types.Message):
     
     await message.answer(about_text, reply_markup=keyboard.as_markup())
 
-# Daily motivation function
+# Daily motivation function (unchanged)
 async def send_daily_motivation():
     try:
         logging.info("Starting daily motivation task...")
         conn = sqlite3.connect('bot_database.db')
         cursor = conn.cursor()
         
-        # Get a random approved motivation
         cursor.execute("SELECT id, text FROM motivations WHERE status = 'approved' ORDER BY RANDOM() LIMIT 1")
         motivation = cursor.fetchone()
         
@@ -1164,7 +1177,6 @@ async def send_daily_motivation():
         
         motivation_id, motivation_text = motivation
         
-        # Get users who are subscribed to both channel and group and want daily motivations
         cursor.execute("SELECT user_id FROM users WHERE is_subscribed_channel = 1 AND is_subscribed_group = 1 AND receive_daily_motivation = 1 AND is_active = 1")
         subscribed_users = cursor.fetchall()
         
@@ -1192,7 +1204,7 @@ async def send_daily_motivation():
             try:
                 await bot.send_message(user[0], daily_text, reply_markup=keyboard.as_markup())
                 sent_count += 1
-                await asyncio.sleep(0.05)  # Avoid flood limits
+                await asyncio.sleep(0.05)
             except Exception as e:
                 logging.error(f"Failed to send daily motivation to {user[0]}: {e}")
                 failed_count += 1
@@ -1202,14 +1214,12 @@ async def send_daily_motivation():
     except Exception as e:
         logging.error(f"Error in daily motivation function: {e}")
 
-# Setup scheduler with timezone
+# Setup scheduler with timezone (unchanged)
 async def setup_scheduler():
     scheduler = AsyncIOScheduler(timezone="Asia/Tashkent")
     
-    # Parse notification time
     hour, minute = map(int, NOTIFICATION_TIME.split(':'))
     
-    # Schedule daily motivation at specified time in Asia/Tashkent timezone
     scheduler.add_job(
         send_daily_motivation,
         CronTrigger(hour=hour, minute=minute, timezone="Asia/Tashkent")
@@ -1217,7 +1227,7 @@ async def setup_scheduler():
     scheduler.start()
     logging.info(f"Scheduler set up for daily motivation at {NOTIFICATION_TIME} Asia/Tashkent")
 
-# Detect blocked users
+# Detect blocked users (unchanged)
 @dp.errors()
 async def handle_errors(update: types.Update, exception: Exception):
     if isinstance(exception, types.errors.TelegramAPIError) and "blocked by user" in str(exception).lower():
@@ -1236,7 +1246,7 @@ async def handle_errors(update: types.Update, exception: Exception):
 # Run the bot
 async def main():
     setup_database()
-    await setup_scheduler()  # Ensure scheduler is started
+    await setup_scheduler()
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
