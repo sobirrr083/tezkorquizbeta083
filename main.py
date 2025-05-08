@@ -961,6 +961,7 @@ async def admin_view_motivations(callback_query: types.CallbackQuery):
         }.get(status, "Noma'lum")
 
         motivation_text =
+        
             f"Motivatsiya #{motivation_id}:\n\n"
             f"📝 Matn: {text}\n"
             f"📊 Status: {status_text}\n"
