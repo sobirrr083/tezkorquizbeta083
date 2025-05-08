@@ -961,7 +961,6 @@ async def admin_view_motivations(callback_query: types.CallbackQuery):
         }.get(status, "Noma'lum")
 
         motivation_text =
-
             f"Motivatsiya #{motivation_id}:\n\n"
             f"📝 Matn: {text}\n"
             f"📊 Status: {status_text}\n"
@@ -970,7 +969,7 @@ async def admin_view_motivations(callback_query: types.CallbackQuery):
             f"👤 Yuborgan: {full_name}\n"
             f"🆔 ID: {submitted_by}\n"
             f"🌐 Username: {username}"
-        )
+        
 
         keyboard = InlineKeyboardBuilder()
         keyboard.row(
@@ -1257,4 +1256,3 @@ async def main():
 if __name__ == '__main__':
     logging.info("Bot ishga tushdi...")
     asyncio.run(main())
-```
