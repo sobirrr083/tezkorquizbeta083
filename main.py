@@ -52,7 +52,7 @@ def setup_database():
     conn = sqlite3.connect('bot_database.db')
     cursor = conn.cursor()
 
-    # Create users table
+    # Create users table with all columns
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users
         (
@@ -61,7 +61,7 @@ def setup_database():
             first_name TEXT,
             last_name TEXT,
             joined_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_active TIMESTAMP,
             is_subscribed_channel BOOLEAN DEFAULT FALSE,
             is_subscribed_group BOOLEAN DEFAULT FALSE,
             receive_daily_motivation BOOLEAN DEFAULT TRUE,
@@ -76,15 +76,15 @@ def setup_database():
     if 'last_active' not in columns:
         cursor.execute('''
             ALTER TABLE users
-            ADD COLUMN last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ADD COLUMN last_active TIMESTAMP
         ''')
-    
+
     if 'receive_daily_motivation' not in columns:
         cursor.execute('''
             ALTER TABLE users
             ADD COLUMN receive_daily_motivation BOOLEAN DEFAULT TRUE
         ''')
-    
+
     if 'is_active' not in columns:
         cursor.execute('''
             ALTER TABLE users
