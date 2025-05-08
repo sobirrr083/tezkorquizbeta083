@@ -1,7 +1,8 @@
+```python
 import os
 import logging
 import asyncio
-import requests  # Added for HTTP requests
+import requests
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -47,11 +48,12 @@ class Form(StatesGroup):
     waiting_for_motivation = State()
     waiting_for_motivation_approval = State()
 
-# Database setup (unchanged)
+# Database setup
 def setup_database():
     conn = sqlite3.connect('bot_database.db')
     cursor = conn.cursor()
 
+    # Create users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users
         (
@@ -68,30 +70,29 @@ def setup_database():
         )
     ''')
 
-    try:
+    # Check and add columns if they don't exist
+    cursor.execute("PRAGMA table_info(users)")
+    columns = [col[1] for col in cursor.fetchall()]
+    
+    if 'last_active' not in columns:
         cursor.execute('''
             ALTER TABLE users
             ADD COLUMN last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ''')
-    except sqlite3.OperationalError:
-        pass
-
-    try:
+    
+    if 'receive_daily_motivation' not in columns:
         cursor.execute('''
             ALTER TABLE users
             ADD COLUMN receive_daily_motivation BOOLEAN DEFAULT TRUE
         ''')
-    except sqlite3.OperationalError:
-        pass
-
-    try:
+    
+    if 'is_active' not in columns:
         cursor.execute('''
             ALTER TABLE users
             ADD COLUMN is_active BOOLEAN DEFAULT TRUE
         ''')
-    except sqlite3.OperationalError:
-        pass
 
+    # Create motivations table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS motivations
         (
@@ -106,6 +107,7 @@ def setup_database():
         )
     ''')
 
+    # Create motivation_likes table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS motivation_likes
         (
@@ -120,7 +122,7 @@ def setup_database():
     conn.commit()
     conn.close()
 
-# Update last active timestamp for a user (unchanged)
+# Update last active timestamp for a user
 def update_last_active(user_id):
     try:
         conn = sqlite3.connect('bot_database.db')
@@ -132,7 +134,7 @@ def update_last_active(user_id):
     except Exception as e:
         logging.error(f"Error updating last_active for user {user_id}: {e}")
 
-# Main keyboard for private chats (unchanged)
+# Main keyboard for private chats
 def get_main_keyboard(user_id=None):
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🆘 Yordam"), types.KeyboardButton(text="ℹ️ Biz haqimizda"))
@@ -153,20 +155,20 @@ def get_main_keyboard(user_id=None):
     builder.row(types.KeyboardButton(text="✨ Motivatsiya qo'shish"), types.KeyboardButton(text=button_text))
     return builder.as_markup(resize_keyboard=True)
 
-# Group keyboard (unchanged)
+# Group keyboard
 def get_group_keyboard():
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🚀 Botga kirish"))
     builder.row(types.KeyboardButton(text="ℹ️ Bot haqida"))
     return builder.as_markup(resize_keyboard=True)
 
-# Back keyboard (unchanged)
+# Back keyboard
 def get_back_keyboard():
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🔙 Ortga qaytish"))
     return builder.as_markup(resize_keyboard=True)
 
-# Check subscription (unchanged)
+# Check subscription
 async def check_subscription(user_id):
     try:
         channel_status = await bot.get_chat_member(CHANNEL_ID, user_id)
@@ -187,7 +189,7 @@ async def check_subscription(user_id):
         logging.error(f"Error checking subscription: {e}")
         return False
 
-# Subscription keyboard (unchanged)
+# Subscription keyboard
 def get_subscription_keyboard():
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="Kanalga a'zo bo'lish", url=f"https://t.me/{CHANNEL_ID.replace('@', '')}"))
@@ -213,7 +215,6 @@ async def query_gemini_flash(prompt):
         )
         response.raise_for_status()
         data = response.json()
-        # Extract the generated text from the response
         if "candidates" in data and data["candidates"]:
             return data["candidates"][0]["content"]["parts"][0]["text"]
         else:
@@ -223,7 +224,7 @@ async def query_gemini_flash(prompt):
         logging.error(f"Error querying Gemini-2.0-Flash API: {e}")
         return "Xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring."
 
-# Command handlers (unchanged except where noted)
+# Command handlers
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
@@ -374,7 +375,7 @@ async def cmd_ai(message: types.Message, state: FSMContext):
     await message.answer("Tezkor Quiz AI bilan suhbatni boshladingiz. Savolingizni yozing (chiqish uchun /stop):",
                          reply_markup=get_back_keyboard())
 
-# Callback handlers (unchanged)
+# Callback handlers
 @dp.callback_query(lambda c: c.data == "check_subscription")
 async def process_subscription_check(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
@@ -393,13 +394,13 @@ async def process_subscription_check(callback_query: types.CallbackQuery):
     else:
         await callback_query.answer("Siz kanal va guruhga to'liq a'zo bo'lmagansiz!", show_alert=True)
 
-# Keep typing action for long responses (unchanged)
+# Keep typing action for long responses
 async def keep_typing(chat_id):
     while True:
         await bot.send_chat_action(chat_id, "typing")
         await asyncio.sleep(5)
 
-# Updated AI query handler
+# AI query handler
 @dp.message(Form.waiting_for_ai_query)
 async def process_ai_query(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -421,7 +422,7 @@ async def process_ai_query(message: types.Message, state: FSMContext):
         logging.error(f"Error in Gemini-2.0-Flash query: {e}")
         await message.answer("Xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring.", reply_markup=get_back_keyboard())
 
-# Remaining handlers (unchanged)
+# Broadcast command
 @dp.message(Command("broadcast"), lambda message: message.chat.type == 'private')
 async def cmd_broadcast(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -479,6 +480,7 @@ async def process_broadcast(message: types.Message, state: FSMContext):
                         reply_markup=get_main_keyboard(user_id))
     await state.clear()
 
+# Motivation handlers
 @dp.message(lambda message: message.text == "✨ Motivatsiya qo'shish" and message.chat.type == 'private')
 async def add_motivation(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -958,7 +960,8 @@ async def admin_view_motivations(callback_query: types.CallbackQuery):
             "rejected": "❌ Rad etilgan"
         }.get(status, "Noma'lum")
 
-        motivation_text = (
+        motivation_text =
+
             f"Motivatsiya #{motivation_id}:\n\n"
             f"📝 Matn: {text}\n"
             f"📊 Status: {status_text}\n"
@@ -1160,7 +1163,7 @@ async def about_from_group(message: types.Message):
     
     await message.answer(about_text, reply_markup=keyboard.as_markup())
 
-# Daily motivation function (unchanged)
+# Daily motivation function
 async def send_daily_motivation():
     try:
         logging.info("Starting daily motivation task...")
@@ -1214,7 +1217,7 @@ async def send_daily_motivation():
     except Exception as e:
         logging.error(f"Error in daily motivation function: {e}")
 
-# Setup scheduler with timezone (unchanged)
+# Setup scheduler with timezone
 async def setup_scheduler():
     scheduler = AsyncIOScheduler(timezone="Asia/Tashkent")
     
@@ -1227,7 +1230,7 @@ async def setup_scheduler():
     scheduler.start()
     logging.info(f"Scheduler set up for daily motivation at {NOTIFICATION_TIME} Asia/Tashkent")
 
-# Detect blocked users (unchanged)
+# Detect blocked users
 @dp.errors()
 async def handle_errors(update: types.Update, exception: Exception):
     if isinstance(exception, types.errors.TelegramAPIError) and "blocked by user" in str(exception).lower():
@@ -1241,6 +1244,8 @@ async def handle_errors(update: types.Update, exception: Exception):
             logging.info(f"User {user_id} marked as inactive (blocked bot)")
         except Exception as e:
             logging.error(f"Error marking user {user_id} as inactive: {e}")
+    else:
+        logging.error(f"Unhandled error: {exception}")
     return True
 
 # Run the bot
@@ -1252,3 +1257,4 @@ async def main():
 if __name__ == '__main__':
     logging.info("Bot ishga tushdi...")
     asyncio.run(main())
+```
